@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { initiateStkPush, isValidKenyanPhone } from '../services/mpesaService';
 
 interface BuyBtcModalProps {
   isOpen: boolean;
@@ -20,7 +21,9 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const [source, setSource] = useState<'mpesa' | 'telebirr'>('mpesa');
   const [amountFiat, setAmountFiat] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [realReference, setRealReference] = useState<string>('');
   const [destMode, setDestMode] = useState<'custodial' | 'external'>(
     wallet.type === 'non-custodial' ? 'external' : 'custodial'
   );
@@ -40,42 +43,66 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     setSource(newSource);
     setPhone('');
     setAmountFiat('');
+    setErrorMessage('');
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (numericFiat <= 0) return;
+
+    if (source === 'telebirr') {
+      setErrorMessage('Telebirr live settlement rail will be activated in Issue #5. Please select M-Pesa for live settlement.');
+      setStep('error');
+      return;
+    }
+
+    if (!isValidKenyanPhone(phone)) {
+      setErrorMessage('Please enter a valid Safaricom number: 07XXXXXXXX or 01XXXXXXXX');
+      setStep('error');
+      return;
+    }
+
     setStep('processing');
+    setErrorMessage('');
 
-    // Simulate mobile payment prompt response
-    setTimeout(() => {
-      const refCode =
-        source === 'mpesa'
-          ? `SAF-MP-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
-          : `ETHIO-TB-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    const res = await initiateStkPush({
+      phone,
+      amount: numericFiat,
+      accountReference: 'BuySats',
+      transactionDesc: 'Bitcoin Purchase',
+    });
 
-      onSuccess({
-        type: 'buy_btc',
-        title: `Bought Sats via ${source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}`,
-        status: 'completed',
-        fromCurrency: currencyCode,
-        fromAmount: numericFiat,
-        toCurrency: 'SATS',
-        toAmount: satsAmount,
-        rateUsed: currentRate,
-        fee: estimatedFee,
-        feeCurrency: currencyCode,
-        recipient: destMode === 'custodial' ? 'In-App Custodial Wallet' : externalAddress,
-        referenceNumber: refCode,
-        walletType: destMode === 'custodial' ? 'custodial' : 'non-custodial',
-        note: `Instant STK purchase to ${destMode === 'custodial' ? 'Custodial balance' : 'Self-custody on-chain'}`,
-      });
+    if (!res.success) {
+      setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt.');
+      setStep('error');
+      return;
+    }
 
-      setStep('success');
-    }, 2200);
+    const refCode = res.checkoutRequestId || res.merchantRequestId || 'DARAJA-BUY-INIT';
+    setRealReference(refCode);
+
+    onSuccess({
+      type: 'buy_btc',
+      title: 'Bought Sats via M-Pesa',
+      status: 'completed',
+      fromCurrency: 'KES',
+      fromAmount: numericFiat,
+      toCurrency: 'SATS',
+      toAmount: satsAmount,
+      rateUsed: currentRate,
+      fee: estimatedFee,
+      feeCurrency: 'KES',
+      recipient: destMode === 'custodial' ? 'In-App Custodial Wallet' : externalAddress,
+      referenceNumber: refCode,
+      walletType: destMode === 'custodial' ? 'custodial' : 'non-custodial',
+      note: `Daraja STK purchase to ${destMode === 'custodial' ? 'Custodial balance' : 'Self-custody on-chain'}`,
+    });
+
+    setStep('success');
   };
 
   const handleResetAndClose = () => {
     setStep('input');
+    setErrorMessage('');
     onClose();
   };
 
@@ -296,6 +323,12 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                     {destMode === 'custodial' ? 'In-App Custodial' : externalAddress}
                   </span>
                 </div>
+                {realReference && (
+                  <div className="flex justify-between">
+                    <span className="text-[#9B97A2]">Reference</span>
+                    <span className="text-[#D1B9B3] font-mono text-[10px] truncate max-w-[180px]">{realReference}</span>
+                  </div>
+                )}
               </div>
 
               <button
@@ -304,6 +337,26 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
               >
                 Done
+              </button>
+            </div>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-[#946069]/20 border border-[#946069]/40 flex items-center justify-center text-[#946069]">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">M-Pesa Request Failed</h3>
+                <p className="text-xs text-[#9B97A2] font-mono mt-1 px-4">{errorMessage}</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Retry
               </button>
             </div>
           )}

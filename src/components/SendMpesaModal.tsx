@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserWallet, Transaction } from '../types';
-import { X, Send, Smartphone, CheckCircle2, Loader2, Store, Hash } from 'lucide-react';
+import { X, Send, Smartphone, CheckCircle2, Loader2, Store, Hash, AlertTriangle } from 'lucide-react';
+import { initiateStkPush, isValidKenyanPhone, formatKenyanPhone } from '../services/mpesaService';
 
 interface SendMpesaModalProps {
   isOpen: boolean;
@@ -22,7 +23,9 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [amountStr, setAmountStr] = useState<string>('');
   const [note, setNote] = useState<string>('');
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [realReference, setRealReference] = useState<string>('');
 
   if (!isOpen) return null;
 
@@ -44,45 +47,65 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const totalDeduction = numericAmount + fee;
 
   const getRecipientDisplay = () => {
-    if (recipientType === 'phone') return `+${phone}`;
+    if (recipientType === 'phone') return `+${formatKenyanPhone(phone) || phone}`;
     if (recipientType === 'till') return `Till No. ${tillNumber}`;
     return `Paybill ${paybillNumber} (Acc: ${accountNumber})`;
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (numericAmount <= 0) return;
+
+    const targetPhone = recipientType === 'phone' ? phone : (wallet.nonCustodialAddress || '254700000000');
+    if (recipientType === 'phone' && !isValidKenyanPhone(phone)) {
+      setErrorMessage('Please enter a valid Safaricom number: 07XXXXXXXX or 01XXXXXXXX');
+      setStep('error');
+      return;
+    }
+
     setStep('processing');
+    setErrorMessage('');
 
-    setTimeout(() => {
-      const refCode = `SAF-${Math.random().toString(36).substring(2, 4).toUpperCase()}${Math.floor(
-        100000 + Math.random() * 900000
-      )}${Math.random().toString(36).substring(2, 4).toUpperCase()}`;
+    const res = await initiateStkPush({
+      phone: targetPhone,
+      amount: numericAmount,
+      accountReference: recipientType === 'till' ? `Till${tillNumber}` : recipientType === 'paybill' ? `PB${paybillNumber}` : 'MpesaSend',
+      transactionDesc: note || (recipientType === 'till' ? 'Merchant Payment' : 'P2P M-Pesa Transfer'),
+    });
 
-      onSuccess({
-        type: 'send_mpesa',
-        title:
-          recipientType === 'phone'
-            ? 'Sent M-Pesa to Phone'
-            : recipientType === 'till'
-            ? 'M-Pesa Buy Goods (Till)'
-            : 'M-Pesa Paybill Payment',
-        status: 'completed',
-        fromCurrency: 'KES',
-        fromAmount: numericAmount,
-        fee,
-        feeCurrency: 'KES',
-        recipient: getRecipientDisplay(),
-        referenceNumber: refCode,
-        walletType: wallet.type,
-        note: note || (recipientType === 'till' ? 'Merchant Payment' : 'P2P M-Pesa Transfer'),
-      });
+    if (!res.success) {
+      setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt.');
+      setStep('error');
+      return;
+    }
 
-      setStep('success');
-    }, 1800);
+    const refCode = res.checkoutRequestId || res.merchantRequestId || 'DARAJA-STK-INIT';
+    setRealReference(refCode);
+
+    onSuccess({
+      type: 'send_mpesa',
+      title:
+        recipientType === 'phone'
+          ? 'Sent M-Pesa to Phone'
+          : recipientType === 'till'
+          ? 'M-Pesa Buy Goods (Till)'
+          : 'M-Pesa Paybill Payment',
+      status: 'completed',
+      fromCurrency: 'KES',
+      fromAmount: numericAmount,
+      fee,
+      feeCurrency: 'KES',
+      recipient: getRecipientDisplay(),
+      referenceNumber: refCode,
+      walletType: wallet.type,
+      note: note || (recipientType === 'till' ? 'Merchant Payment' : 'P2P M-Pesa Transfer'),
+    });
+
+    setStep('success');
   };
 
   const handleResetAndClose = () => {
     setStep('input');
+    setErrorMessage('');
     onClose();
   };
 
@@ -319,6 +342,12 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                   <span className="text-[#9B97A2]">Service Fee</span>
                   <span className="text-[#9B97A2]">{fee} KES</span>
                 </div>
+                {realReference && (
+                  <div className="flex justify-between">
+                    <span className="text-[#9B97A2]">Reference</span>
+                    <span className="text-[#D1B9B3] font-mono text-[10px] truncate max-w-[180px]">{realReference}</span>
+                  </div>
+                )}
               </div>
 
               <button
@@ -327,6 +356,26 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
               >
                 Done
+              </button>
+            </div>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-[#946069]/20 border border-[#946069]/40 flex items-center justify-center text-[#946069]">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">M-Pesa Request Failed</h3>
+                <p className="text-xs text-[#9B97A2] font-mono mt-1 px-4">{errorMessage}</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Retry
               </button>
             </div>
           )}
