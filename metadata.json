@@ -1,0 +1,8 @@
+{
+  "name": "Altradits - yebente",
+  "description": "Minimalist mobile app to buy and sell Bitcoin with M-Pesa and Telebirr with real-time exchange rates and secure transaction history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
