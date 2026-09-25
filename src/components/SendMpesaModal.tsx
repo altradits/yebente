@@ -251,7 +251,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
                   <span className="font-semibold">Amount</span>
                   <span className="font-mono text-[#9B97A2]">
-                    Avail: {wallet.mpesaBalanceKes.toLocaleString()} KES
+                    Via Safaricom M-Pesa
                   </span>
                 </div>
                 <div className="relative">
@@ -299,12 +299,10 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericAmount <= 0 || totalDeduction > wallet.mpesaBalanceKes}
+                disabled={numericAmount <= 0}
                 className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#763698]/25"
               >
-                {totalDeduction > wallet.mpesaBalanceKes
-                  ? 'Insufficient M-Pesa Balance'
-                  : `Send ${numericAmount.toLocaleString()} KES`}
+                Send {numericAmount > 0 ? `${numericAmount.toLocaleString()} KES` : 'M-Pesa'}
               </button>
             </>
           )}

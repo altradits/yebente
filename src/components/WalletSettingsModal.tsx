@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserWallet, WalletType } from '../types';
 import { fetchBitcoinAddressBalance, AddressBalanceResult } from '../services/blockchainService';
+import { queryWebLNBalance } from '../services/lightningService';
 import {
   X,
   ShieldCheck,
@@ -71,7 +72,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
     let finalSats = 0;
 
     if (selectedType === 'non-custodial') {
-      if (onChainResult && onChainResult.success) {
+      if (onChainResult && onChainResult.success && !onChainResult.isLightning) {
         finalSats = onChainResult.sats;
       } else {
         finalSats = parseInt(satsStr, 10) || 0;
@@ -83,14 +84,16 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
     const finalKes = parseFloat(mpesaStr) || 0;
     const finalEtb = parseFloat(telebirrStr) || 0;
 
+    const detectedLabel = onChainResult?.lightningProvider
+      ? `${onChainResult.lightningProvider} (Lightning)`
+      : (selectedType === 'custodial' ? 'In-App Custodial Vault' : 'Self-Custody Key');
+
     onUpdateWallet({
       ...wallet,
       isConnected: true,
       type: selectedType,
       nonCustodialAddress: finalAddress,
-      nonCustodialLabel:
-        wallet.nonCustodialLabel ||
-        (selectedType === 'custodial' ? 'In-App Custodial Vault' : 'Self-Custody Key'),
+      nonCustodialLabel: detectedLabel,
       satsBalance: finalSats,
       btcBalance: finalSats / 100_000_000,
       mpesaBalanceKes: finalKes,
@@ -197,7 +200,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                       setAddress(e.target.value);
                       setOnChainResult(null);
                     }}
-                    placeholder="bc1q..."
+                    placeholder="bc1q... or username@walletofsatoshi.com"
                     className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698] pr-9"
                   />
                   <button
@@ -215,7 +218,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                   </button>
                 </div>
 
-                {/* On-chain balance verification action */}
+                {/* On-chain balance or Lightning Address verification action */}
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     type="button"
@@ -228,17 +231,22 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                     ) : (
                       <CheckCircle2 className="w-3.5 h-3.5 text-[#763698]" />
                     )}
-                    <span>Verify On-Chain Balance</span>
+                    <span>Verify Wallet (On-Chain / Lightning)</span>
                   </button>
 
-                  {onChainResult && onChainResult.success && (
+                  {onChainResult && onChainResult.success && onChainResult.isLightning && (
+                    <span className="text-[11px] font-mono text-[#D1B9B3]">
+                      Verified: {onChainResult.lightningProvider} (Active)
+                    </span>
+                  )}
+                  {onChainResult && onChainResult.success && !onChainResult.isLightning && (
                     <span className="text-[11px] font-mono text-[#D1B9B3]">
                       Verified: {onChainResult.sats.toLocaleString()} Sats
                     </span>
                   )}
                   {onChainResult && !onChainResult.success && (
                     <span className="text-[11px] font-mono text-red-400">
-                      Unverified / 0 Sats
+                      {onChainResult.error || 'Unverified'}
                     </span>
                   )}
                 </div>
@@ -246,9 +254,24 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
 
               {/* Sats balance override/display if not auto-verified */}
               <div>
-                <label className="block font-semibold text-[#D1B9B3] mb-1">
-                  Sats Balance
-                </label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block font-semibold text-[#D1B9B3]">
+                    Sats Balance
+                  </label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await queryWebLNBalance();
+                      if (res.available && typeof res.sats === 'number') {
+                        setSatsStr(String(res.sats));
+                      }
+                    }}
+                    className="text-[10px] font-mono text-[#9B97A2] hover:text-[#D1B9B3] underline"
+                    title="Auto-query connected WebLN extension"
+                  >
+                    Auto-detect WebLN
+                  </button>
+                </div>
                 <input
                   type="number"
                   value={satsStr}

@@ -1,3 +1,5 @@
+import { isLightningAddress, resolveLightningAddress } from './lightningService';
+
 export interface AddressBalanceResult {
   sats: number;
   btc: number;
@@ -5,23 +7,29 @@ export interface AddressBalanceResult {
   unconfirmedSats: number;
   txCount: number;
   success: boolean;
+  isLightning?: boolean;
+  lightningProvider?: string;
+  minSendableSats?: number;
+  maxSendableSats?: number;
+  callbackUrl?: string;
   error?: string;
 }
 
 /**
- * Validates basic Bitcoin address structure (Legacy 1..., P2SH 3..., Native SegWit bc1q..., Taproot bc1p...)
+ * Validates basic Bitcoin address structure or Lightning Address (user@domain)
  */
 export function isValidBitcoinAddress(address: string): boolean {
   const clean = address.trim();
   if (!clean) return false;
+  if (isLightningAddress(clean)) return true;
   // Standard mainnet regex for legacy, p2sh, segwit, taproot
   const btcRegex = /^(bc1[a-z0-9]{25,90}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/i;
   return btcRegex.test(clean);
 }
 
 /**
- * Fetches real on-chain satoshi balance directly from the Bitcoin blockchain via mempool.space,
- * falling back to blockstream.info.
+ * Fetches real on-chain satoshi balance from Bitcoin nodes,
+ * or resolves Lightning Addresses (such as Wallet of Satoshi) via LNURL.
  */
 export async function fetchBitcoinAddressBalance(
   address: string
@@ -36,6 +44,35 @@ export async function fetchBitcoinAddressBalance(
       txCount: 0,
       success: false,
       error: 'Empty address',
+    };
+  }
+
+  // 1. Check if this is a Layer 2 Lightning Address (e.g. user@walletofsatoshi.com)
+  if (isLightningAddress(clean)) {
+    const lnDetails = await resolveLightningAddress(clean);
+    if (!lnDetails.success) {
+      return {
+        sats: 0,
+        btc: 0,
+        confirmedSats: 0,
+        unconfirmedSats: 0,
+        txCount: 0,
+        success: false,
+        error: lnDetails.error || 'Failed to resolve Lightning Address.',
+      };
+    }
+    return {
+      sats: 0,
+      btc: 0,
+      confirmedSats: 0,
+      unconfirmedSats: 0,
+      txCount: 0,
+      success: true,
+      isLightning: true,
+      lightningProvider: lnDetails.provider,
+      minSendableSats: lnDetails.minSendableSats,
+      maxSendableSats: lnDetails.maxSendableSats,
+      callbackUrl: lnDetails.callbackUrl,
     };
   }
 
