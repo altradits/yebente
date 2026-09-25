@@ -16,10 +16,22 @@ export interface AddressBalanceResult {
 }
 
 /**
+ * Strips URI schemes (bitcoin:, lightning:) and query parameters (?amount=...)
+ */
+export function sanitizeBitcoinAddress(input: string): string {
+  let clean = input.trim();
+  clean = clean.replace(/^(bitcoin|lightning):/i, '');
+  if (clean.includes('?')) {
+    clean = clean.split('?')[0];
+  }
+  return clean.trim();
+}
+
+/**
  * Validates basic Bitcoin address structure or Lightning Address (user@domain)
  */
 export function isValidBitcoinAddress(address: string): boolean {
-  const clean = address.trim();
+  const clean = sanitizeBitcoinAddress(address);
   if (!clean) return false;
   if (isLightningAddress(clean)) return true;
   // Standard mainnet regex for legacy, p2sh, segwit, taproot
@@ -34,7 +46,7 @@ export function isValidBitcoinAddress(address: string): boolean {
 export async function fetchBitcoinAddressBalance(
   address: string
 ): Promise<AddressBalanceResult> {
-  const clean = address.trim();
+  const clean = sanitizeBitcoinAddress(address);
   if (!clean) {
     return {
       sats: 0,
@@ -76,12 +88,12 @@ export async function fetchBitcoinAddressBalance(
     };
   }
 
-  // 1. Try mempool.space API
+  // 2. Query Blockstream API (fastest, high reliability)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`https://mempool.space/api/address/${clean}`, {
+    const res = await fetch(`https://blockstream.info/api/address/${clean}`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -114,12 +126,40 @@ export async function fetchBitcoinAddressBalance(
     // try fallback
   }
 
-  // 2. Try blockstream.info API fallback
+  // 3. Query Blockchain.info rawaddr API (secondary high-availability fallback)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`https://blockstream.info/api/address/${clean}`, {
+    const res = await fetch(`https://blockchain.info/rawaddr/${clean}?limit=0`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      const finalSats = Math.max(0, Number(data.final_balance) || 0);
+      const txCount = Number(data.n_tx) || 0;
+
+      return {
+        sats: finalSats,
+        btc: finalSats / 100_000_000,
+        confirmedSats: finalSats,
+        unconfirmedSats: 0,
+        txCount,
+        success: true,
+      };
+    }
+  } catch {
+    // try tertiary fallback
+  }
+
+  // 4. Query Mempool.space API (tertiary fallback with short timeout)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(`https://mempool.space/api/address/${clean}`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -149,9 +189,10 @@ export async function fetchBitcoinAddressBalance(
       };
     }
   } catch {
-    // Both failed or offline
+    // All nodes failed
   }
 
+  const isSyntacticallyValid = isValidBitcoinAddress(clean);
   return {
     sats: 0,
     btc: 0,
@@ -159,6 +200,8 @@ export async function fetchBitcoinAddressBalance(
     unconfirmedSats: 0,
     txCount: 0,
     success: false,
-    error: 'Could not reach Bitcoin blockchain node. Check network or address.',
+    error: isSyntacticallyValid
+      ? 'Bitcoin blockchain nodes are unreachable. Check internet connection.'
+      : 'Invalid Bitcoin or Lightning Address format. Check address.',
   };
 }
