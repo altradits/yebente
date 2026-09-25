@@ -6,11 +6,12 @@ import {
   saveStoredWallet,
   getStoredTransactions,
   addTransaction,
+  ejectWallet,
+  wipeWallet,
 } from './services/storageService';
 import { TopBar } from './components/TopBar';
 import { BalanceCard } from './components/BalanceCard';
 import { ActionGrid } from './components/ActionGrid';
-import { RatesTicker } from './components/RatesTicker';
 import { TransactionHistory } from './components/TransactionHistory';
 import { BuyBtcModal } from './components/BuyBtcModal';
 import { SellBtcModal } from './components/SellBtcModal';
@@ -22,6 +23,7 @@ import { ArrowDownLeft, ArrowUpRight, Send, ArrowRight } from 'lucide-react';
 
 export default function App() {
   const [wallet, setWallet] = useState<UserWallet>(getStoredWallet);
+  const [showBalanceSection, setShowBalanceSection] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>(getStoredTransactions);
   const [rates, setRates] = useState<ExchangeRates>({
     btcUsd: 88450,
@@ -67,6 +69,27 @@ export default function App() {
   const handleUpdateWallet = (updated: UserWallet) => {
     setWallet(updated);
     saveStoredWallet(updated);
+    setShowBalanceSection(false);
+  };
+
+  const handleEjectWallet = () => {
+    const ejected = ejectWallet(wallet);
+    setWallet(ejected);
+    setShowBalanceSection(false);
+  };
+
+  const handleWipeWallet = () => {
+    const wiped = wipeWallet();
+    setWallet(wiped);
+    setShowBalanceSection(false);
+  };
+
+  const handleRequireWalletAction = (action: () => void) => {
+    if (!wallet.isConnected) {
+      setActiveModal('wallet_settings');
+      return;
+    }
+    action();
   };
 
   const handleTransactionSuccess = (txData: Omit<Transaction, 'id' | 'timestamp'>) => {
@@ -76,47 +99,48 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-start p-0 md:p-6 select-none font-sans">
+    <div className="min-h-screen bg-[#120E16] text-[#F8F0E7] flex flex-col items-center justify-start p-0 md:p-6 select-none font-sans">
       {/* Outer Mobile Frame container or full width */}
       <div
         className={`w-full transition-all duration-300 ${
           isFrameMode
-            ? 'max-w-[440px] md:my-4 md:border md:border-neutral-800 md:rounded-[40px] md:shadow-2xl md:shadow-black/80 md:overflow-hidden bg-neutral-950 flex flex-col min-h-screen md:min-h-[860px]'
-            : 'max-w-2xl bg-neutral-950 flex flex-col min-h-screen'
+            ? 'max-w-[440px] md:my-4 md:border md:border-[#382B44] md:rounded-[40px] md:shadow-2xl md:shadow-black/90 md:overflow-hidden bg-[#16101D] flex flex-col min-h-screen md:min-h-[860px]'
+            : 'max-w-2xl bg-[#16101D] flex flex-col min-h-screen'
         }`}
       >
-        {/* Top Bar with brand Altradits • yebente and wallet mode */}
+        {/* Top Bar with brand yebente and wallet mode */}
         <TopBar
           wallet={wallet}
-          isRatesLive={rates.isLive}
-          onRefreshRates={loadRates}
-          isRefreshing={isRefreshingRates}
           onOpenWalletSettings={() => setActiveModal('wallet_settings')}
+          onEjectWallet={handleEjectWallet}
           isFrameMode={isFrameMode}
           onToggleFrameMode={() => setIsFrameMode(!isFrameMode)}
+          showBalanceSection={showBalanceSection}
+          onToggleBalanceSection={() => setShowBalanceSection((prev) => !prev)}
         />
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-24">
-          {/* 1. Main Balance Portfolio Card */}
-          <BalanceCard
-            wallet={wallet}
-            rates={rates}
-            onOpenWalletSettings={() => setActiveModal('wallet_settings')}
-          />
+          {/* 1. Main Balance Portfolio Card (only rendered when connected AND navbar button clicked) */}
+          {wallet.isConnected && showBalanceSection && (
+            <BalanceCard
+              wallet={wallet}
+              rates={rates}
+              onOpenWalletSettings={() => setActiveModal('wallet_settings')}
+              onEjectWallet={handleEjectWallet}
+              onClose={() => setShowBalanceSection(false)}
+            />
+          )}
 
           {/* 2. Core 4 Actions: Buy BTC, Sell BTC, Send M-Pesa, Send Telebirr */}
           <ActionGrid
-            onBuyBtc={() => setActiveModal('buy_btc')}
-            onSellBtc={() => setActiveModal('sell_btc')}
+            onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
+            onSellBtc={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
             onSendMpesa={() => setActiveModal('send_mpesa')}
             onSendTelebirr={() => setActiveModal('send_telebirr')}
           />
 
-          {/* 3. Real-Time Exchange Rates Ticker */}
-          <RatesTicker rates={rates} />
-
-          {/* 4. Secure Transaction History */}
+          {/* 3. Secure Transaction History */}
           <TransactionHistory
             transactions={transactions}
             onSelectTransaction={(tx) => setSelectedTx(tx)}
@@ -126,38 +150,38 @@ export default function App() {
         {/* Fixed Thumb-Zone Bottom Action Bar for rapid one-handed mobile use */}
         <nav
           aria-label="Quick operations"
-          className="sticky bottom-0 z-20 bg-neutral-950/90 backdrop-blur-md border-t border-neutral-850 px-4 py-2.5"
+          className="sticky bottom-0 z-20 bg-[#16101D]/95 backdrop-blur-md border-t border-[#372A42] px-4 py-2.5"
         >
           <div className="grid grid-cols-4 gap-1.5 max-w-md mx-auto">
             {/* Quick Buy */}
             <button
-              onClick={() => setActiveModal('buy_btc')}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-xl text-neutral-400 hover:text-amber-400 active:scale-95 transition-all"
+              onClick={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
+              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
             >
-              <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-1">
-                <ArrowDownLeft className="w-4 h-4 text-amber-400" />
+              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#763698]/60 flex items-center justify-center mb-1 transition-colors">
+                <ArrowDownLeft className="w-4 h-4 text-[#D1B9B3]" />
               </div>
-              <span className="text-[10px] font-medium tracking-tight">Buy BTC</span>
+              <span className="text-[10px] font-medium tracking-tight">Buy Sats</span>
             </button>
 
             {/* Quick Sell */}
             <button
-              onClick={() => setActiveModal('sell_btc')}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-xl text-neutral-400 hover:text-amber-400 active:scale-95 transition-all"
+              onClick={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
+              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
             >
-              <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-1">
-                <ArrowUpRight className="w-4 h-4 text-amber-400" />
+              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#946069]/60 flex items-center justify-center mb-1 transition-colors">
+                <ArrowUpRight className="w-4 h-4 text-[#946069]" />
               </div>
-              <span className="text-[10px] font-medium tracking-tight">Sell BTC</span>
+              <span className="text-[10px] font-medium tracking-tight">Sell Sats</span>
             </button>
 
             {/* Quick M-Pesa */}
             <button
               onClick={() => setActiveModal('send_mpesa')}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-xl text-neutral-400 hover:text-emerald-400 active:scale-95 transition-all"
+              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
             >
-              <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-1">
-                <Send className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#554653] flex items-center justify-center mb-1 transition-colors">
+                <Send className="w-3.5 h-3.5 text-[#D1B9B3]" />
               </div>
               <span className="text-[10px] font-medium tracking-tight">M-Pesa</span>
             </button>
@@ -165,10 +189,10 @@ export default function App() {
             {/* Quick Telebirr */}
             <button
               onClick={() => setActiveModal('send_telebirr')}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-xl text-neutral-400 hover:text-cyan-400 active:scale-95 transition-all"
+              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
             >
-              <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-1">
-                <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
+              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#554653] flex items-center justify-center mb-1 transition-colors">
+                <ArrowRight className="w-3.5 h-3.5 text-[#9B97A2]" />
               </div>
               <span className="text-[10px] font-medium tracking-tight">Telebirr</span>
             </button>
@@ -217,6 +241,8 @@ export default function App() {
         onClose={() => setActiveModal('none')}
         wallet={wallet}
         onUpdateWallet={handleUpdateWallet}
+        onEjectWallet={handleEjectWallet}
+        onWipeWallet={handleWipeWallet}
       />
     </div>
   );

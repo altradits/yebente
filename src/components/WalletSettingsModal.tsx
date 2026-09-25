@@ -1,69 +1,137 @@
 import React, { useState } from 'react';
 import { UserWallet, WalletType } from '../types';
-import { X, ShieldCheck, KeyRound, RefreshCw, Copy, Check, Sparkles } from 'lucide-react';
-import { DEFAULT_WALLET } from '../services/storageService';
+import { fetchBitcoinAddressBalance, AddressBalanceResult } from '../services/blockchainService';
+import {
+  X,
+  ShieldCheck,
+  KeyRound,
+  Copy,
+  Check,
+  LogOut,
+  Trash2,
+  Plus,
+  Loader2,
+  CheckCircle2,
+} from 'lucide-react';
 
 interface WalletSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   wallet: UserWallet;
   onUpdateWallet: (updated: UserWallet) => void;
+  onEjectWallet: () => void;
+  onWipeWallet: () => void;
 }
-
-const SAMPLE_SEED_WORDS = [
-  'anchor', 'vintage', 'harvest', 'timber', 'solar', 'summit',
-  'breeze', 'crypto', 'safari', 'nile', 'oasis', 'shield'
-];
 
 export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
   isOpen,
   onClose,
   wallet,
   onUpdateWallet,
+  onEjectWallet,
+  onWipeWallet,
 }) => {
-  const [selectedType, setSelectedType] = useState<WalletType>(wallet.type);
-  const [address, setAddress] = useState(wallet.nonCustodialAddress);
-  const [showSeed, setShowSeed] = useState(false);
+  const [selectedType, setSelectedType] = useState<WalletType>(wallet.type || 'non-custodial');
+  const [address, setAddress] = useState(wallet.nonCustodialAddress || '');
+  const [satsStr, setSatsStr] = useState<string>(
+    wallet.satsBalance > 0 ? String(wallet.satsBalance) : ''
+  );
+  const [mpesaStr, setMpesaStr] = useState<string>(
+    wallet.mpesaBalanceKes > 0 ? String(wallet.mpesaBalanceKes) : ''
+  );
+  const [telebirrStr, setTelebirrStr] = useState<string>(
+    wallet.telebirrBalanceEtb > 0 ? String(wallet.telebirrBalanceEtb) : ''
+  );
+
   const [copiedAddr, setCopiedAddr] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [onChainResult, setOnChainResult] = useState<AddressBalanceResult | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
+  const handleVerifyOnChain = async () => {
+    const cleanAddr = address.trim();
+    if (!cleanAddr) return;
+    setIsVerifying(true);
+    setOnChainResult(null);
+    try {
+      const res = await fetchBitcoinAddressBalance(cleanAddr);
+      setOnChainResult(res);
+      if (res.success) {
+        setSatsStr(String(res.sats));
+      }
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  // Insert or update wallet
+  const handleInsertOrUpdate = () => {
+    const finalAddress = address.trim();
+    let finalSats = 0;
+
+    if (selectedType === 'non-custodial') {
+      if (onChainResult && onChainResult.success) {
+        finalSats = onChainResult.sats;
+      } else {
+        finalSats = parseInt(satsStr, 10) || 0;
+      }
+    } else {
+      finalSats = parseInt(satsStr, 10) || 0;
+    }
+
+    const finalKes = parseFloat(mpesaStr) || 0;
+    const finalEtb = parseFloat(telebirrStr) || 0;
+
     onUpdateWallet({
       ...wallet,
+      isConnected: true,
       type: selectedType,
-      nonCustodialAddress: address.trim() || DEFAULT_WALLET.nonCustodialAddress,
+      nonCustodialAddress: finalAddress,
+      nonCustodialLabel:
+        wallet.nonCustodialLabel ||
+        (selectedType === 'custodial' ? 'In-App Custodial Vault' : 'Self-Custody Key'),
+      satsBalance: finalSats,
+      btcBalance: finalSats / 100_000_000,
+      mpesaBalanceKes: finalKes,
+      telebirrBalanceEtb: finalEtb,
+      insertedAt: wallet.insertedAt || Date.now(),
+      lastSyncedAt: Date.now(),
+      onChainVerified: selectedType === 'non-custodial' && Boolean(onChainResult?.success),
     });
+
     onClose();
   };
 
-  const handleResetDemoBalances = () => {
-    onUpdateWallet({
-      ...wallet,
-      btcBalance: 0.05,
-      mpesaBalanceKes: 50000,
-      telebirrBalanceEtb: 40000,
-    });
+  const handleEject = () => {
+    onEjectWallet();
+    onClose();
   };
 
-  const handleGenerateNewAddress = () => {
-    const chars = '023456789acdefghjklmnpqrstuvwxyz';
-    let rand = 'bc1q';
-    for (let i = 0; i < 38; i++) {
-      rand += chars[Math.floor(Math.random() * chars.length)];
+  const handleWipe = () => {
+    if (confirm('Permanently wipe and remove all wallet keys and balances from this device?')) {
+      onWipeWallet();
+      onClose();
     }
-    setAddress(rand);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-neutral-900 border border-neutral-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
-          <h2 className="text-base font-bold text-white">Wallet Configuration</h2>
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]"
+      >
+        {/* Header - No icon before H element */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
+          <h2 className="text-base font-bold text-[#F8F0E7]">
+            {wallet.isConnected ? 'Wallet Security & Keys' : 'Insert Sats Wallet'}
+          </h2>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center"
+            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -71,141 +139,239 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
 
         {/* Content */}
         <div className="p-5 overflow-y-auto space-y-4 text-xs">
-          {/* Mode Switcher */}
+          {/* Custody Preference Switcher */}
           <div>
-            <label className="block text-xs font-semibold text-neutral-300 mb-2">
-              Select Wallet Custody Mode
+            <label className="block text-xs font-semibold text-[#D1B9B3] mb-2">
+              {wallet.isConnected ? 'Custody Model' : 'Select Custody Type to Insert'}
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {/* Custodial Option */}
-              <button
-                type="button"
-                onClick={() => setSelectedType('custodial')}
-                className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
-                  selectedType === 'custodial'
-                    ? 'border-amber-500 bg-amber-500/10 text-white'
-                    : 'border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-neutral-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <ShieldCheck className="w-4 h-4 text-amber-400" />
-                  <span className="font-bold text-xs text-white">Custodial</span>
-                </div>
-                <p className="text-[11px] text-neutral-400 leading-snug">
-                  Managed wallet with instant zero-fee transfers and automated key management.
-                </p>
-              </button>
-
               {/* Non-Custodial Option */}
               <button
                 type="button"
                 onClick={() => setSelectedType('non-custodial')}
-                className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                className={`p-3 rounded-2xl border text-left flex flex-col justify-center transition-all ${
                   selectedType === 'non-custodial'
-                    ? 'border-emerald-500 bg-emerald-500/10 text-white'
-                    : 'border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-neutral-700'
+                    ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7] shadow-sm shadow-[#763698]/20'
+                    : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
                 }`}
               >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <KeyRound className="w-4 h-4 text-emerald-400" />
-                  <span className="font-bold text-xs text-white">Non-Custodial</span>
+                <div className="flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-[#763698]" />
+                  <span className="font-bold text-xs text-[#F8F0E7]">Self-Custody</span>
                 </div>
-                <p className="text-[11px] text-neutral-400 leading-snug">
-                  Full self-custody. Connect your own external address; keys remain in your hands.
-                </p>
+              </button>
+
+              {/* Custodial Option */}
+              <button
+                type="button"
+                onClick={() => setSelectedType('custodial')}
+                className={`p-3 rounded-2xl border text-left flex flex-col justify-center transition-all ${
+                  selectedType === 'custodial'
+                    ? 'border-[#D1B9B3] bg-[#D1B9B3]/15 text-[#F8F0E7] shadow-sm'
+                    : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#D1B9B3]" />
+                  <span className="font-bold text-xs text-[#F8F0E7]">In-App Vault</span>
+                </div>
               </button>
             </div>
           </div>
 
-          {/* Non-Custodial specific settings */}
+          {/* Self-Custodial Inputs */}
           {selectedType === 'non-custodial' && (
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3.5 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-neutral-300">Your Bitcoin Address</span>
-                <button
-                  type="button"
-                  onClick={handleGenerateNewAddress}
-                  className="flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-mono"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  Generate New
-                </button>
-              </div>
+            <div className="bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-semibold text-[#D1B9B3]">
+                    Sats / Bitcoin Address (SegWit / Taproot / Legacy)
+                  </label>
+                </div>
 
-              <div className="relative">
-                <input
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="bc1q..."
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500 pr-9"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(address);
-                    setCopiedAddr(true);
-                    setTimeout(() => setCopiedAddr(false), 2000);
-                  }}
-                  className="absolute right-2 top-2 text-neutral-500 hover:text-neutral-300"
-                >
-                  {copiedAddr ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-
-              {/* Seed phrase drawer */}
-              <div className="pt-2 border-t border-neutral-800">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-neutral-400">12-Word Seed Recovery</span>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => {
+                      setAddress(e.target.value);
+                      setOnChainResult(null);
+                    }}
+                    placeholder="bc1q..."
+                    className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698] pr-9"
+                  />
                   <button
                     type="button"
-                    onClick={() => setShowSeed(!showSeed)}
-                    className="text-[11px] text-neutral-400 hover:text-white underline font-mono"
+                    onClick={() => {
+                      if (address) {
+                        navigator.clipboard.writeText(address);
+                        setCopiedAddr(true);
+                        setTimeout(() => setCopiedAddr(false), 2000);
+                      }
+                    }}
+                    className="absolute right-2 top-2 text-[#9B97A2] hover:text-[#F8F0E7]"
                   >
-                    {showSeed ? 'Hide Seed' : 'View Seed Words'}
+                    {copiedAddr ? <Check className="w-3.5 h-3.5 text-[#D1B9B3]" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 </div>
 
-                {showSeed && (
-                  <div className="grid grid-cols-3 gap-1.5 p-2 bg-neutral-900 rounded-lg border border-neutral-800 font-mono text-[10px]">
-                    {SAMPLE_SEED_WORDS.map((w, i) => (
-                      <div key={i} className="text-neutral-400">
-                        <span className="text-neutral-600 mr-1">{i + 1}.</span>
-                        <span className="text-white">{w}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* On-chain balance verification action */}
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleVerifyOnChain}
+                    disabled={!address.trim() || isVerifying}
+                    className="px-3 py-1.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] font-mono text-[11px] flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  >
+                    {isVerifying ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#763698]" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#763698]" />
+                    )}
+                    <span>Verify On-Chain Balance</span>
+                  </button>
+
+                  {onChainResult && onChainResult.success && (
+                    <span className="text-[11px] font-mono text-[#D1B9B3]">
+                      Verified: {onChainResult.sats.toLocaleString()} Sats
+                    </span>
+                  )}
+                  {onChainResult && !onChainResult.success && (
+                    <span className="text-[11px] font-mono text-red-400">
+                      Unverified / 0 Sats
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Sats balance override/display if not auto-verified */}
+              <div>
+                <label className="block font-semibold text-[#D1B9B3] mb-1">
+                  Sats Balance
+                </label>
+                <input
+                  type="number"
+                  value={satsStr}
+                  onChange={(e) => setSatsStr(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
+                />
+              </div>
+
+              {/* Real M-Pesa Balance */}
+              <div>
+                <label className="block font-semibold text-[#D1B9B3] mb-1">
+                  M-Pesa Balance (KES)
+                </label>
+                <input
+                  type="number"
+                  value={mpesaStr}
+                  onChange={(e) => setMpesaStr(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
+                />
+              </div>
+
+              {/* Real Telebirr Balance */}
+              <div>
+                <label className="block font-semibold text-[#D1B9B3] mb-1">
+                  Telebirr Balance (ETB)
+                </label>
+                <input
+                  type="number"
+                  value={telebirrStr}
+                  onChange={(e) => setTelebirrStr(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
+                />
               </div>
             </div>
           )}
 
-          {/* Reset / Demo Funds option */}
-          <div className="pt-2 border-t border-neutral-800 flex items-center justify-between">
-            <div>
-              <div className="font-semibold text-neutral-300">Quick Test Funds</div>
-              <div className="text-[11px] text-neutral-500">
-                Refill KES 50,000 · ETB 40,000 · 0.05 BTC
+          {/* Custodial Inputs */}
+          {selectedType === 'custodial' && (
+            <div className="bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 space-y-3">
+              <div>
+                <label className="block font-semibold text-[#D1B9B3] mb-1">
+                  Vault Sats Balance
+                </label>
+                <input
+                  type="number"
+                  value={satsStr}
+                  onChange={(e) => setSatsStr(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#D1B9B3] mb-1">
+                  M-Pesa Balance (KES)
+                </label>
+                <input
+                  type="number"
+                  value={mpesaStr}
+                  onChange={(e) => setMpesaStr(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#D1B9B3] mb-1">
+                  Telebirr Balance (ETB)
+                </label>
+                <input
+                  type="number"
+                  value={telebirrStr}
+                  onChange={(e) => setTelebirrStr(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
+                />
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleResetDemoBalances}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white font-medium transition-colors"
-            >
-              <RefreshCw className="w-3 h-3 text-amber-400" />
-              <span>Reset Funds</span>
-            </button>
-          </div>
+          )}
 
-          {/* Save Button */}
+          {/* Primary Action Button: Insert / Apply */}
           <button
             type="button"
-            onClick={handleSave}
-            className="w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-sm transition-colors mt-2"
+            onClick={handleInsertOrUpdate}
+            className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-bold text-sm transition-all mt-2 shadow-lg shadow-[#763698]/25 flex items-center justify-center gap-2"
           >
-            Apply Configuration
+            <Plus className="w-4 h-4" />
+            <span>{wallet.isConnected ? 'Save & Activate Wallet' : 'Insert & Activate Wallet'}</span>
           </button>
+
+          {/* Full Removal / Wipe Options if wallet is attached */}
+          {wallet.isConnected && (
+            <div className="pt-2 border-t border-[#382B44] grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleEject}
+                className="h-10 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#946069] text-[#9B97A2] hover:text-[#946069] font-medium text-xs flex items-center justify-center gap-1.5 transition-colors"
+                title="Disconnect wallet from current session"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Eject Session</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleWipe}
+                className="h-10 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-red-500/60 text-[#9B97A2] hover:text-red-400 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors"
+                title="Wipe all keys and clear memory"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Wipe & Remove</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

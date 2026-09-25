@@ -1,24 +1,35 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates } from '../types';
-import { Copy, Check, Eye, EyeOff, ShieldCheck, KeyRound } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, ShieldCheck, KeyRound, LogOut, X } from 'lucide-react';
 
 interface BalanceCardProps {
   wallet: UserWallet;
   rates: ExchangeRates;
   onOpenWalletSettings: () => void;
+  onEjectWallet?: () => void;
+  onClose?: () => void;
 }
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
   wallet,
   rates,
   onOpenWalletSettings,
+  onEjectWallet,
+  onClose,
 }) => {
   const [hideBalances, setHideBalances] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
 
-  const btcValueKes = wallet.btcBalance * rates.btcKes;
-  const btcValueUsd = wallet.btcBalance * rates.btcUsd;
-  const btcValueEtb = wallet.btcBalance * rates.btcEtb;
+  // If wallet is not connected / ejected, do not render balance card
+  if (!wallet.isConnected) {
+    return null;
+  }
+
+  const sats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
+  const btcEquiv = sats / 100_000_000;
+  const btcValueKes = btcEquiv * rates.btcKes;
+  const btcValueUsd = btcEquiv * rates.btcUsd;
+  const btcValueEtb = btcEquiv * rates.btcEtb;
 
   const handleCopyAddress = () => {
     if (wallet.nonCustodialAddress) {
@@ -36,104 +47,130 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
   };
 
   return (
-    <div className="bg-gradient-to-b from-neutral-900 to-neutral-900/80 border border-neutral-800 rounded-2xl p-4 shadow-xl">
-      {/* Top row: Label & Visibility & Mode */}
-      <div className="flex items-center justify-between text-xs text-neutral-400 mb-2">
-        <div className="flex items-center gap-1.5">
-          <span>Bitcoin Balance</span>
+    <div className="bg-gradient-to-b from-[#21182A] to-[#181120] border border-[#3C2E49] rounded-3xl p-5 shadow-xl shadow-[#120E16]/80 relative overflow-hidden">
+      {/* Subtle glowing ambient gradient inspired by Etail 3D lighting */}
+      <div className="absolute -top-16 -right-16 w-36 h-36 bg-[#763698]/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-16 -left-16 w-36 h-36 bg-[#946069]/15 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Top row: Label & Visibility & Mode & Eject Button */}
+      <div className="relative flex items-center justify-between text-xs text-[#9B97A2] mb-2.5">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-[#D1B9B3]">Sats Balance</span>
           <button
             onClick={() => setHideBalances(!hideBalances)}
-            className="text-neutral-500 hover:text-neutral-300 transition-colors p-0.5"
+            className="text-[#9B97A2] hover:text-[#F8F0E7] transition-colors p-0.5"
             aria-label={hideBalances ? 'Show balance' : 'Hide balance'}
           >
             {hideBalances ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
         </div>
 
-        <button
-          onClick={onOpenWalletSettings}
-          className="flex items-center gap-1 text-[11px] font-mono text-neutral-400 hover:text-neutral-200 transition-colors"
-        >
-          {wallet.type === 'custodial' ? (
-            <>
-              <ShieldCheck className="w-3 h-3 text-amber-500" />
-              <span>Custodial Wallet</span>
-            </>
-          ) : (
-            <>
-              <KeyRound className="w-3 h-3 text-emerald-500" />
-              <span>Self-Custody</span>
-            </>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={onOpenWalletSettings}
+            className="flex items-center gap-1.5 text-[11px] font-mono text-[#D1B9B3] hover:text-[#F8F0E7] bg-[#2C1F38]/80 hover:bg-[#382748] px-2.5 py-1 rounded-lg border border-[#554653]/60 transition-colors"
+          >
+            {wallet.type === 'custodial' ? (
+              <>
+                <ShieldCheck className="w-3 h-3 text-[#D1B9B3]" />
+                <span>Custodial</span>
+              </>
+            ) : (
+              <>
+                <KeyRound className="w-3 h-3 text-[#763698]" />
+                <span>Self-Custody</span>
+              </>
+            )}
+          </button>
+
+          {onEjectWallet && (
+            <button
+              onClick={onEjectWallet}
+              className="flex items-center gap-1 text-[11px] font-mono text-[#9B97A2] hover:text-[#946069] bg-[#1A1322] hover:bg-[#281822] px-2 py-1 rounded-lg border border-[#3C2E49] hover:border-[#946069]/50 transition-colors"
+              title="Eject / Remove Wallet to secure keys"
+            >
+              <LogOut className="w-3 h-3 text-[#946069]" />
+              <span className="hidden sm:inline">Eject</span>
+            </button>
           )}
-        </button>
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="w-6 h-6 rounded-lg bg-[#281E33] border border-[#3C2E49] flex items-center justify-center text-[#9B97A2] hover:text-[#F8F0E7] transition-colors active:scale-95 ml-0.5"
+              title="Hide Sats Balance"
+              aria-label="Hide Sats Balance"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Primary BTC Balance */}
-      <div className="mb-3">
-        <div className="flex items-baseline gap-2">
-          <span className="text-3xl font-extrabold tracking-tight text-white font-mono tabular-nums">
-            {hideBalances ? '••••••••' : wallet.btcBalance.toFixed(6)}
+      {/* Primary Sats Balance */}
+      <div className="relative mb-3.5">
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-3.5xl font-extrabold tracking-tight text-[#F8F0E7] font-mono tabular-nums">
+            {hideBalances ? '••••••••' : sats.toLocaleString()}
           </span>
-          <span className="text-base font-bold text-amber-400">BTC</span>
+          <span className="text-base font-bold text-[#D1B9B3] tracking-wide">Sats</span>
         </div>
 
         {/* Multi-currency equivalent */}
-        <div className="flex items-center gap-2 text-xs text-neutral-400 mt-1 font-mono tabular-nums">
-          <span>{hideBalances ? '••••' : `≈ KES ${formatNumber(btcValueKes, 0)}`}</span>
-          <span aria-hidden="true" className="text-neutral-600">·</span>
+        <div className="flex items-center gap-2 text-xs text-[#9B97A2] mt-1 font-mono tabular-nums">
+          <span>{hideBalances ? '••••' : `KES ${formatNumber(btcValueKes, 0)}`}</span>
+          <span aria-hidden="true" className="text-[#554653]">·</span>
           <span>{hideBalances ? '••••' : `$${formatNumber(btcValueUsd, 2)}`}</span>
-          <span aria-hidden="true" className="text-neutral-600">·</span>
+          <span aria-hidden="true" className="text-[#554653]">·</span>
           <span>{hideBalances ? '••••' : `ETB ${formatNumber(btcValueEtb, 0)}`}</span>
         </div>
       </div>
 
       {/* Non-custodial public address view if in non-custodial mode */}
       {wallet.type === 'non-custodial' && (
-        <div className="mb-3 py-2 px-3 rounded-xl bg-neutral-950/80 border border-neutral-800/80 flex items-center justify-between gap-2">
+        <div className="relative mb-3.5 py-2.5 px-3.5 rounded-2xl bg-[#140E1B]/90 border border-[#554653] flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
-              Connected BTC Address
+            <div className="text-[10px] uppercase font-mono text-[#9B97A2] tracking-wider">
+              Connected Sats / Bitcoin Address
             </div>
-            <div className="font-mono text-xs text-emerald-400 truncate">
+            <div className="font-mono text-xs text-[#D1B9B3] truncate">
               {wallet.nonCustodialAddress}
             </div>
           </div>
           <button
             onClick={handleCopyAddress}
-            className="p-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition-colors shrink-0"
+            className="p-1.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] hover:text-[#F8F0E7] transition-colors shrink-0"
             title="Copy address"
           >
-            {copiedAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedAddress ? <Check className="w-3.5 h-3.5 text-[#D1B9B3]" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
         </div>
       )}
 
       {/* Secondary Mobile Money Balances */}
-      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-neutral-800/80">
+      <div className="relative grid grid-cols-2 gap-2.5 pt-3.5 border-t border-[#372A42]">
         {/* M-Pesa Balance Card */}
-        <div className="bg-neutral-950/60 rounded-xl p-2.5 border border-neutral-800/60">
+        <div className="bg-[#150F1D]/80 rounded-2xl p-3 border border-[#3A2C46]">
           <div className="flex items-center justify-between text-[11px] mb-1">
-            <span className="text-emerald-400 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span className="text-[#D1B9B3] font-semibold">
               M-Pesa
             </span>
-            <span className="text-neutral-500 font-mono text-[10px]">KES</span>
+            <span className="text-[#9B97A2] font-mono text-[10px]">KES</span>
           </div>
-          <div className="font-mono text-base font-bold text-white tabular-nums">
+          <div className="font-mono text-base font-bold text-[#F8F0E7] tabular-nums">
             {hideBalances ? '••••••' : formatNumber(wallet.mpesaBalanceKes, 0)}
           </div>
         </div>
 
         {/* Telebirr Balance Card */}
-        <div className="bg-neutral-950/60 rounded-xl p-2.5 border border-neutral-800/60">
+        <div className="bg-[#150F1D]/80 rounded-2xl p-3 border border-[#3A2C46]">
           <div className="flex items-center justify-between text-[11px] mb-1">
-            <span className="text-cyan-400 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+            <span className="text-[#946069] font-semibold">
               Telebirr
             </span>
-            <span className="text-neutral-500 font-mono text-[10px]">ETB</span>
+            <span className="text-[#9B97A2] font-mono text-[10px]">ETB</span>
           </div>
-          <div className="font-mono text-base font-bold text-white tabular-nums">
+          <div className="font-mono text-base font-bold text-[#F8F0E7] tabular-nums">
             {hideBalances ? '••••••' : formatNumber(wallet.telebirrBalanceEtb, 0)}
           </div>
         </div>

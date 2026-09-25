@@ -1,77 +1,130 @@
 import { ExchangeRates } from '../types';
 
-const STORAGE_KEY = 'altradits_rates_cache';
+const STORAGE_KEY = 'altradits_rates_cache_v2';
 
-// Baseline fallback rates
+// Baseline fallback in case device is completely offline on initial boot
 const DEFAULT_RATES: ExchangeRates = {
-  btcUsd: 88450,
-  btcKes: 11410050,
-  btcEtb: 11321600,
-  usdKes: 129.0,
-  usdEtb: 128.0,
-  change24hUsd: 2.45,
-  change24hKes: 2.38,
-  change24hEtb: 2.52,
+  btcUsd: 84500,
+  btcKes: 10940000,
+  btcEtb: 13745000,
+  usdKes: 129.5,
+  usdEtb: 162.7,
+  change24hUsd: 0.95,
+  change24hKes: 0.92,
+  change24hEtb: 0.98,
   lastUpdated: Date.now(),
   isLive: false,
 };
 
 export async function fetchLiveRates(): Promise<ExchangeRates> {
+  let btcUsd: number | null = null;
+  let change24hUsd: number | null = null;
+  let usdKes: number | null = null;
+  let usdEtb: number | null = null;
+
+  // 1. Fetch real-time BTC/USD from Coinbase Spot API
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const res = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,kes,etb&include_24hr_change=true',
-      { signal: controller.signal }
-    );
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const cbRes = await fetch('https://api.coinbase.com/v2/prices/spot?currency=USD', {
+      signal: controller.signal,
+    });
     clearTimeout(timeoutId);
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.bitcoin) {
-        const btcUsd = data.bitcoin.usd || DEFAULT_RATES.btcUsd;
-        const btcKes = data.bitcoin.kes || btcUsd * 129.0;
-        const btcEtb = data.bitcoin.etb || btcUsd * 128.0;
-
-        const liveRates: ExchangeRates = {
-          btcUsd,
-          btcKes,
-          btcEtb,
-          usdKes: btcKes / btcUsd,
-          usdEtb: btcEtb / btcUsd,
-          change24hUsd: data.bitcoin.usd_24h_change || 2.1,
-          change24hKes: data.bitcoin.kes_24h_change || 2.05,
-          change24hEtb: data.bitcoin.etb_24h_change || 2.12,
-          lastUpdated: Date.now(),
-          isLive: true,
-        };
-
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(liveRates));
-        } catch {
-          // ignore storage error
-        }
-        return liveRates;
+    if (cbRes.ok) {
+      const cbData = await cbRes.json();
+      const price = parseFloat(cbData?.data?.amount);
+      if (!isNaN(price) && price > 0) {
+        btcUsd = price;
       }
     }
   } catch {
-    // network or timeout, continue to cached or fallback
+    // try fallback below
   }
 
-  // Check cached rates
+  // 2. Fetch 24h change and fallback BTC price from CoinGecko
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const cgRes = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
+      { signal: controller.signal }
+    );
+    clearTimeout(timeoutId);
+    if (cgRes.ok) {
+      const cgData = await cgRes.json();
+      if (cgData?.bitcoin) {
+        if (!btcUsd && cgData.bitcoin.usd) {
+          btcUsd = cgData.bitcoin.usd;
+        }
+        if (typeof cgData.bitcoin.usd_24h_change === 'number') {
+          change24hUsd = cgData.bitcoin.usd_24h_change;
+        }
+      }
+    }
+  } catch {
+    // continue
+  }
+
+  // 3. Fetch real live Forex rates for KES and ETB against USD
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const fxRes = await fetch('https://open.er-api.com/v6/latest/USD', {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (fxRes.ok) {
+      const fxData = await fxRes.json();
+      if (fxData?.rates) {
+        if (typeof fxData.rates.KES === 'number') {
+          usdKes = fxData.rates.KES;
+        }
+        if (typeof fxData.rates.ETB === 'number') {
+          usdEtb = fxData.rates.ETB;
+        }
+      }
+    }
+  } catch {
+    // continue
+  }
+
+  // If we fetched live data, compute exact live rates
+  if (btcUsd !== null && btcUsd > 0) {
+    const finalUsdKes = usdKes || DEFAULT_RATES.usdKes;
+    const finalUsdEtb = usdEtb || DEFAULT_RATES.usdEtb;
+    const finalBtcKes = Math.round(btcUsd * finalUsdKes);
+    const finalBtcEtb = Math.round(btcUsd * finalUsdEtb);
+    const finalChange = change24hUsd !== null ? change24hUsd : DEFAULT_RATES.change24hUsd;
+
+    const liveRates: ExchangeRates = {
+      btcUsd: Math.round(btcUsd * 100) / 100,
+      btcKes: finalBtcKes,
+      btcEtb: finalBtcEtb,
+      usdKes: Math.round(finalUsdKes * 100) / 100,
+      usdEtb: Math.round(finalUsdEtb * 100) / 100,
+      change24hUsd: Math.round(finalChange * 100) / 100,
+      change24hKes: Math.round(finalChange * 100) / 100,
+      change24hEtb: Math.round(finalChange * 100) / 100,
+      lastUpdated: Date.now(),
+      isLive: true,
+    };
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(liveRates));
+    } catch {
+      // ignore
+    }
+
+    return liveRates;
+  }
+
+  // Check cached verified live rates if offline
   try {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (cached) {
       const parsed = JSON.parse(cached) as ExchangeRates;
-      // apply a realistic minor fluctuation (±0.05%)
-      const jitter = 1 + (Math.random() * 0.002 - 0.001);
       return {
         ...parsed,
-        btcUsd: Math.round(parsed.btcUsd * jitter),
-        btcKes: Math.round(parsed.btcKes * jitter),
-        btcEtb: Math.round(parsed.btcEtb * jitter),
-        lastUpdated: Date.now(),
         isLive: true,
       };
     }

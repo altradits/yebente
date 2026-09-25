@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserWallet, Transaction } from '../types';
-import { X, ArrowRight, Smartphone, CheckCircle2, Loader2, Info } from 'lucide-react';
+import { X, ArrowRight, Smartphone, CheckCircle2, Loader2 } from 'lucide-react';
 
 interface SendTelebirrModalProps {
   isOpen: boolean;
@@ -15,8 +15,8 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
   wallet,
   onSuccess,
 }) => {
-  const [phone, setPhone] = useState<string>('251911234567');
-  const [amountStr, setAmountStr] = useState<string>('2000');
+  const [phone, setPhone] = useState<string>('');
+  const [amountStr, setAmountStr] = useState<string>('');
   const [note, setNote] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
 
@@ -58,22 +58,21 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-neutral-900 border border-neutral-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-              <ArrowRight className="w-4 h-4" />
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#946069]/25 border border-[#946069]/50 flex items-center justify-center text-[#D1B9B3]">
+              <ArrowRight className="w-4 h-4 text-[#F8F0E7]" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Send Telebirr</h2>
-              <p className="text-[11px] text-neutral-400">Ethio Telecom instant transfer</p>
+              <h2 className="text-base font-bold text-[#F8F0E7]">Send Telebirr</h2>
             </div>
           </div>
           <button
             onClick={handleResetAndClose}
-            className="w-8 h-8 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center"
+            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -85,7 +84,7 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
             <>
               {/* Phone number */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1">
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
                   Recipient Telebirr Phone
                 </label>
                 <div className="relative">
@@ -93,21 +92,19 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                     placeholder="2519XXXXXXXX or 2517XXXXXXXX"
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-cyan-500"
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
-                  <Smartphone className="w-4 h-4 text-neutral-500 absolute right-3 top-3" />
+                  <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
                 </div>
-                <p className="text-[10px] text-neutral-500 mt-1">
-                  Supports all Ethio telecom active 09... and 07... numbers.
-                </p>
               </div>
 
               {/* Amount */}
               <div>
-                <div className="flex justify-between items-center text-xs text-neutral-300 mb-1.5">
+                <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
                   <span className="font-semibold">Amount to Transfer</span>
-                  <span className="font-mono text-neutral-500">
+                  <span className="font-mono text-[#9B97A2]">
                     Avail: {wallet.telebirrBalanceEtb.toLocaleString()} ETB
                   </span>
                 </div>
@@ -116,10 +113,11 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
                     type="number"
                     value={amountStr}
                     onChange={(e) => setAmountStr(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                     placeholder="0"
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-lg font-mono font-bold text-white focus:outline-none focus:border-cyan-500"
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
-                  <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-cyan-400">
+                  <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
                     ETB
                   </span>
                 </div>
@@ -127,27 +125,27 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
 
               {/* Note / Memo */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1">
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
                   Purpose / Remark (Optional)
                 </label>
                 <input
                   type="text"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="e.g. Family support, Rent, Services"
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                  placeholder="Optional remark"
+                  className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                 />
               </div>
 
               {/* Fee breakdown */}
-              <div className="bg-neutral-950/80 rounded-xl p-3 border border-neutral-800 text-xs font-mono space-y-1">
-                <div className="flex justify-between text-neutral-400">
+              <div className="bg-[#140E1B]/90 rounded-2xl p-3 border border-[#382B44] text-xs font-mono space-y-1">
+                <div className="flex justify-between text-[#9B97A2]">
                   <span>Telebirr Network Fee</span>
                   <span>{fee} ETB</span>
                 </div>
-                <div className="flex justify-between font-bold text-white pt-1 border-t border-neutral-800">
+                <div className="flex justify-between font-bold text-[#F8F0E7] pt-1.5 border-t border-[#382B44]">
                   <span>Total Debit</span>
-                  <span className="text-cyan-400">{totalDeduction.toLocaleString()} ETB</span>
+                  <span className="text-[#D1B9B3]">{totalDeduction.toLocaleString()} ETB</span>
                 </div>
               </div>
 
@@ -156,7 +154,7 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
                 type="button"
                 onClick={handleConfirm}
                 disabled={numericAmount <= 0 || totalDeduction > wallet.telebirrBalanceEtb}
-                className="w-full h-12 rounded-xl bg-cyan-500 hover:bg-cyan-400 active:scale-[0.98] text-neutral-950 font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-cyan-500/10"
+                className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
               >
                 {totalDeduction > wallet.telebirrBalanceEtb
                   ? 'Insufficient Telebirr Balance'
@@ -167,49 +165,43 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
 
           {step === 'processing' && (
             <div className="py-8 flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <div className="w-16 h-16 rounded-full bg-[#946069]/20 border border-[#946069]/40 flex items-center justify-center text-[#D1B9B3]">
                 <Loader2 className="w-8 h-8 animate-spin" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Transmitting Telebirr</h3>
-                <p className="text-xs text-neutral-400 mt-1 max-w-xs font-mono">
-                  Dispatching {numericAmount.toLocaleString()} ETB to +{phone}...
-                </p>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Transmitting Telebirr</h3>
               </div>
             </div>
           )}
 
           {step === 'success' && (
             <div className="py-6 flex flex-col items-center text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <div className="w-14 h-14 rounded-full bg-[#946069]/25 border border-[#946069]/50 flex items-center justify-center text-[#D1B9B3]">
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Telebirr Sent Successfully</h3>
-                <p className="text-xs text-neutral-400 mt-1">
-                  Recipient account has been credited instantly.
-                </p>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Telebirr Sent Successfully</h3>
               </div>
 
-              <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-3.5 text-left font-mono text-xs space-y-2">
+              <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Amount Sent</span>
-                  <span className="text-cyan-400 font-bold">{numericAmount.toLocaleString()} ETB</span>
+                  <span className="text-[#9B97A2]">Amount Sent</span>
+                  <span className="text-[#D1B9B3] font-bold">{numericAmount.toLocaleString()} ETB</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Recipient Phone</span>
-                  <span className="text-white">+{phone}</span>
+                  <span className="text-[#9B97A2]">Recipient Phone</span>
+                  <span className="text-[#F8F0E7]">+{phone}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Service Fee</span>
-                  <span className="text-neutral-400">{fee} ETB</span>
+                  <span className="text-[#9B97A2]">Service Fee</span>
+                  <span className="text-[#9B97A2]">{fee} ETB</span>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={handleResetAndClose}
-                className="w-full h-11 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-medium text-sm transition-all"
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
               >
                 Done
               </button>

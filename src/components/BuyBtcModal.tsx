@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2, Info } from 'lucide-react';
+import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2 } from 'lucide-react';
 
 interface BuyBtcModalProps {
   isOpen: boolean;
@@ -18,14 +18,14 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   onSuccess,
 }) => {
   const [source, setSource] = useState<'mpesa' | 'telebirr'>('mpesa');
-  const [amountFiat, setAmountFiat] = useState<string>('5000');
-  const [phone, setPhone] = useState<string>('254712345678');
+  const [amountFiat, setAmountFiat] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
   const [destMode, setDestMode] = useState<'custodial' | 'external'>(
     wallet.type === 'non-custodial' ? 'external' : 'custodial'
   );
   const [externalAddress, setExternalAddress] = useState<string>(
-    wallet.nonCustodialAddress || 'bc1q9x38n7c4g2lpxym56d2t8k0l09a2q8u9478f7e'
+    wallet.nonCustodialAddress || ''
   );
 
   if (!isOpen) return null;
@@ -33,18 +33,13 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const currentRate = source === 'mpesa' ? rates.btcKes : rates.btcEtb;
   const currencyCode = source === 'mpesa' ? 'KES' : 'ETB';
   const numericFiat = parseFloat(amountFiat) || 0;
-  const btcAmount = currentRate > 0 ? numericFiat / currentRate : 0;
+  const satsAmount = currentRate > 0 ? Math.round((numericFiat / currentRate) * 100_000_000) : 0;
   const estimatedFee = source === 'mpesa' ? 50 : 20;
 
   const handleSourceChange = (newSource: 'mpesa' | 'telebirr') => {
     setSource(newSource);
-    if (newSource === 'mpesa') {
-      setPhone('254712345678');
-      setAmountFiat('5000');
-    } else {
-      setPhone('251911234567');
-      setAmountFiat('4500');
-    }
+    setPhone('');
+    setAmountFiat('');
   };
 
   const handleConfirm = () => {
@@ -60,12 +55,12 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
       onSuccess({
         type: 'buy_btc',
-        title: `Bought BTC via ${source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}`,
+        title: `Bought Sats via ${source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}`,
         status: 'completed',
         fromCurrency: currencyCode,
         fromAmount: numericFiat,
-        toCurrency: 'BTC',
-        toAmount: parseFloat(btcAmount.toFixed(8)),
+        toCurrency: 'SATS',
+        toAmount: satsAmount,
         rateUsed: currentRate,
         fee: estimatedFee,
         feeCurrency: currencyCode,
@@ -85,22 +80,21 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-neutral-900 border border-neutral-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <ArrowDownLeft className="w-4 h-4" />
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
+              <ArrowDownLeft className="w-4 h-4 text-[#F8F0E7]" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Buy Bitcoin</h2>
-              <p className="text-[11px] text-neutral-400">Instant exchange from mobile money</p>
+              <h2 className="text-base font-bold text-[#F8F0E7]">Buy Sats</h2>
             </div>
           </div>
           <button
             onClick={handleResetAndClose}
-            className="w-8 h-8 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center"
+            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -112,32 +106,30 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
             <>
               {/* Payment Method Selector */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-2">
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-2">
                   Payment Source
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => handleSourceChange('mpesa')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-medium transition-all ${
+                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-medium transition-all ${
                       source === 'mpesa'
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                        : 'border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-neutral-700'
+                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7] shadow-sm shadow-[#763698]/20'
+                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
                     }`}
                   >
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
                     M-Pesa (Kenya KES)
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSourceChange('telebirr')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-medium transition-all ${
+                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-medium transition-all ${
                       source === 'telebirr'
-                        ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
-                        : 'border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-neutral-700'
+                        ? 'border-[#946069] bg-[#946069]/20 text-[#F8F0E7] shadow-sm shadow-[#946069]/20'
+                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
                     }`}
                   >
-                    <span className="w-2 h-2 rounded-full bg-cyan-500" />
                     Telebirr (Ethiopia ETB)
                   </button>
                 </div>
@@ -145,9 +137,9 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
               {/* Amount Inputs */}
               <div>
-                <div className="flex justify-between items-center text-xs text-neutral-300 mb-1.5">
+                <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
                   <span className="font-semibold">You Pay</span>
-                  <span className="font-mono text-neutral-500">
+                  <span className="font-mono text-[#9B97A2]">
                     Avail: {source === 'mpesa' ? `${wallet.mpesaBalanceKes.toLocaleString()} KES` : `${wallet.telebirrBalanceEtb.toLocaleString()} ETB`}
                   </span>
                 </div>
@@ -156,44 +148,45 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                     type="number"
                     value={amountFiat}
                     onChange={(e) => setAmountFiat(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                     placeholder="Enter amount"
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-lg font-mono font-bold text-white focus:outline-none focus:border-amber-500"
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
-                  <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-neutral-400">
+                  <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
                     {currencyCode}
                   </span>
                 </div>
               </div>
 
               {/* You Receive Calculation */}
-              <div className="bg-neutral-950/80 border border-neutral-800/80 rounded-xl p-3">
-                <div className="flex justify-between items-center text-xs text-neutral-400 mb-1">
+              <div className="bg-[#140E1B]/90 border border-[#382B44] rounded-2xl p-3.5">
+                <div className="flex justify-between items-center text-xs text-[#9B97A2] mb-1">
                   <span>You Receive</span>
-                  <span className="text-[11px] font-mono text-amber-400/90">
-                    1 BTC = {currentRate.toLocaleString()} {currencyCode}
+                  <span className="text-[11px] font-mono text-[#D1B9B3]">
+                    100,000 Sats = {Math.round(currentRate * 0.001).toLocaleString()} {currencyCode}
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold font-mono text-amber-400 tabular-nums">
-                    {btcAmount.toFixed(8)}
+                  <span className="text-xl font-bold font-mono text-[#D1B9B3] tabular-nums">
+                    {satsAmount.toLocaleString()}
                   </span>
-                  <span className="text-sm font-bold text-white font-mono">BTC</span>
+                  <span className="text-sm font-bold text-[#F8F0E7] font-mono">Sats</span>
                 </div>
               </div>
 
               {/* Destination Wallet Preference (Custodial or Non-Custodial) */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
                   Deposit Destination
                 </label>
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   <button
                     type="button"
                     onClick={() => setDestMode('custodial')}
-                    className={`py-2 px-3 rounded-lg border text-xs font-medium transition-all ${
+                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
                       destMode === 'custodial'
-                        ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                        : 'border-neutral-800 bg-neutral-950 text-neutral-400'
+                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7]'
+                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
                     }`}
                   >
                     Custodial (In-App)
@@ -201,10 +194,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setDestMode('external')}
-                    className={`py-2 px-3 rounded-lg border text-xs font-medium transition-all ${
+                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
                       destMode === 'external'
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                        : 'border-neutral-800 bg-neutral-950 text-neutral-400'
+                        ? 'border-[#D1B9B3] bg-[#D1B9B3]/15 text-[#F8F0E7]'
+                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
                     }`}
                   >
                     Non-Custodial (Self)
@@ -218,18 +211,15 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                       value={externalAddress}
                       onChange={(e) => setExternalAddress(e.target.value)}
                       placeholder="Bitcoin address (e.g. bc1q...)"
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
                     />
-                    <p className="text-[10px] text-neutral-500 mt-1">
-                      Bitcoin will be broadcast directly to your self-custody address.
-                    </p>
                   </div>
                 )}
               </div>
 
               {/* Mobile Phone for prompt */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
                   {source === 'mpesa' ? 'M-Pesa Phone Number' : 'Telebirr Phone Number'}
                 </label>
                 <div className="relative">
@@ -237,26 +227,23 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                     placeholder={source === 'mpesa' ? '2547XXXXXXXX' : '2519XXXXXXXX'}
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-amber-500"
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
-                  <Smartphone className="w-4 h-4 text-neutral-500 absolute right-3 top-3" />
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-neutral-500 mt-1.5">
-                  <Info className="w-3 h-3 text-neutral-400 shrink-0" />
-                  <span>An instant prompt will appear on this handset to authorize.</span>
+                  <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
                 </div>
               </div>
 
               {/* Fees summary */}
-              <div className="text-xs text-neutral-400 space-y-1 pt-1 font-mono">
+              <div className="text-xs text-[#9B97A2] space-y-1 pt-1 font-mono">
                 <div className="flex justify-between">
                   <span>Network / Carrier Fee</span>
                   <span>{estimatedFee} {currencyCode}</span>
                 </div>
-                <div className="flex justify-between font-bold text-white pt-1 border-t border-neutral-800">
+                <div className="flex justify-between font-bold text-[#F8F0E7] pt-1.5 border-t border-[#382B44]">
                   <span>Total Debit</span>
-                  <span>{(numericFiat + estimatedFee).toLocaleString()} {currencyCode}</span>
+                  <span className="text-[#D1B9B3]">{(numericFiat + estimatedFee).toLocaleString()} {currencyCode}</span>
                 </div>
               </div>
 
@@ -265,7 +252,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 type="button"
                 onClick={handleConfirm}
                 disabled={numericFiat <= 0}
-                className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-neutral-950 font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-amber-500/10"
+                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#763698]/25"
               >
                 Proceed with {source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}
               </button>
@@ -274,48 +261,38 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
           {step === 'processing' && (
             <div className="py-8 flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <div className="w-16 h-16 rounded-full bg-[#763698]/20 border border-[#763698]/40 flex items-center justify-center text-[#D1B9B3]">
                 <Loader2 className="w-8 h-8 animate-spin" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">
+                <h3 className="text-lg font-bold text-[#F8F0E7]">
                   {source === 'mpesa' ? 'M-Pesa STK Prompt Sent' : 'Telebirr Request Sent'}
                 </h3>
-                <p className="text-xs text-neutral-400 mt-1 max-w-xs font-mono">
-                  Please check phone <span className="text-white">+{phone}</span> and enter your PIN to authorize payment of{' '}
-                  <span className="text-amber-400 font-bold">{(numericFiat + estimatedFee).toLocaleString()} {currencyCode}</span>.
-                </p>
-              </div>
-              <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-3 text-xs text-neutral-400 font-mono">
-                Simulating network authorization...
               </div>
             </div>
           )}
 
           {step === 'success' && (
             <div className="py-6 flex flex-col items-center text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <div className="w-14 h-14 rounded-full bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Bitcoin Purchase Successful</h3>
-                <p className="text-xs text-neutral-400 mt-1">
-                  Payment confirmed. Funds are now credited.
-                </p>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Sats Purchase Successful</h3>
               </div>
 
-              <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-3.5 text-left font-mono text-xs space-y-2">
+              <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Bitcoin Acquired</span>
-                  <span className="text-amber-400 font-bold">+{btcAmount.toFixed(8)} BTC</span>
+                  <span className="text-[#9B97A2]">Sats Acquired</span>
+                  <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Paid Amount</span>
-                  <span className="text-white">{numericFiat.toLocaleString()} {currencyCode}</span>
+                  <span className="text-[#9B97A2]">Paid Amount</span>
+                  <span className="text-[#F8F0E7]">{numericFiat.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Destination</span>
-                  <span className="text-emerald-400 truncate max-w-[180px]">
+                  <span className="text-[#9B97A2]">Destination</span>
+                  <span className="text-[#D1B9B3] truncate max-w-[180px]">
                     {destMode === 'custodial' ? 'In-App Custodial' : externalAddress}
                   </span>
                 </div>
@@ -324,7 +301,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               <button
                 type="button"
                 onClick={handleResetAndClose}
-                className="w-full h-11 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-medium text-sm transition-all"
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
               >
                 Done
               </button>

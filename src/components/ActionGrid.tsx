@@ -16,47 +16,47 @@ export const ActionGrid: React.FC<ActionGridProps> = ({
 }) => {
   return (
     <div className="grid grid-cols-2 gap-2.5">
-      {/* 1. Buy BTC */}
+      {/* 1. Buy Sats */}
       <button
         onClick={onBuyBtc}
-        className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-amber-500/50 hover:bg-neutral-850 active:scale-[0.98] transition-all text-left shadow-sm min-h-[92px]"
+        className="group relative flex flex-col justify-between p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#763698] hover:bg-[#261D32] active:scale-[0.98] transition-all text-left shadow-md shadow-[#120E16]/50 min-h-[96px]"
       >
         <div className="flex items-center justify-between w-full">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
-            <ArrowDownLeft className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-2xl bg-[#763698]/20 border border-[#763698]/40 flex items-center justify-center text-[#D1B9B3] group-hover:scale-105 group-hover:bg-[#763698]/30 transition-all">
+            <ArrowDownLeft className="w-5 h-5 text-[#F8F0E7]" />
           </div>
-          <span className="text-[10px] font-mono text-neutral-500 group-hover:text-neutral-300 transition-colors">
+          <span className="text-[10px] font-mono text-[#9B97A2] group-hover:text-[#D1B9B3] transition-colors">
             Instant
           </span>
         </div>
-        <div className="mt-2">
-          <div className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
-            Buy BTC
+        <div className="mt-2.5">
+          <div className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
+            Buy Sats
           </div>
-          <div className="text-[11px] text-neutral-400">
+          <div className="text-[11px] text-[#9B97A2]">
             From M-Pesa / Telebirr
           </div>
         </div>
       </button>
 
-      {/* 2. Sell BTC */}
+      {/* 2. Sell Sats */}
       <button
         onClick={onSellBtc}
-        className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-amber-500/50 hover:bg-neutral-850 active:scale-[0.98] transition-all text-left shadow-sm min-h-[92px]"
+        className="group relative flex flex-col justify-between p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#946069] hover:bg-[#261D32] active:scale-[0.98] transition-all text-left shadow-md shadow-[#120E16]/50 min-h-[96px]"
       >
         <div className="flex items-center justify-between w-full">
-          <div className="w-9 h-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
-            <ArrowUpRight className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-2xl bg-[#946069]/20 border border-[#946069]/40 flex items-center justify-center text-[#D1B9B3] group-hover:scale-105 group-hover:bg-[#946069]/30 transition-all">
+            <ArrowUpRight className="w-5 h-5 text-[#F8F0E7]" />
           </div>
-          <span className="text-[10px] font-mono text-neutral-500 group-hover:text-neutral-300 transition-colors">
+          <span className="text-[10px] font-mono text-[#9B97A2] group-hover:text-[#D1B9B3] transition-colors">
             Cash Out
           </span>
         </div>
-        <div className="mt-2">
-          <div className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
-            Sell BTC
+        <div className="mt-2.5">
+          <div className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
+            Sell Sats
           </div>
-          <div className="text-[11px] text-neutral-400">
+          <div className="text-[11px] text-[#9B97A2]">
             To M-Pesa / Telebirr
           </div>
         </div>
@@ -65,21 +65,21 @@ export const ActionGrid: React.FC<ActionGridProps> = ({
       {/* 3. Send M-Pesa */}
       <button
         onClick={onSendMpesa}
-        className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-emerald-500/50 hover:bg-neutral-850 active:scale-[0.98] transition-all text-left shadow-sm min-h-[92px]"
+        className="group relative flex flex-col justify-between p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#D1B9B3]/70 hover:bg-[#261D32] active:scale-[0.98] transition-all text-left shadow-md shadow-[#120E16]/50 min-h-[96px]"
       >
         <div className="flex items-center justify-between w-full">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
-            <Send className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-2xl bg-[#554653]/35 border border-[#554653] flex items-center justify-center text-[#D1B9B3] group-hover:scale-105 group-hover:bg-[#554653]/50 transition-all">
+            <Send className="w-4 h-4 text-[#F8F0E7]" />
           </div>
-          <span className="text-[10px] font-mono text-emerald-500 font-medium">
+          <span className="text-[10px] font-mono text-[#D1B9B3] font-medium">
             Safaricom
           </span>
         </div>
-        <div className="mt-2">
-          <div className="text-sm font-bold text-white group-hover:text-emerald-300 transition-colors">
+        <div className="mt-2.5">
+          <div className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
             Send M-Pesa
           </div>
-          <div className="text-[11px] text-neutral-400">
+          <div className="text-[11px] text-[#9B97A2]">
             KES to Phone or Till
           </div>
         </div>
@@ -88,21 +88,21 @@ export const ActionGrid: React.FC<ActionGridProps> = ({
       {/* 4. Send Telebirr */}
       <button
         onClick={onSendTelebirr}
-        className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-cyan-500/50 hover:bg-neutral-850 active:scale-[0.98] transition-all text-left shadow-sm min-h-[92px]"
+        className="group relative flex flex-col justify-between p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#763698]/70 hover:bg-[#261D32] active:scale-[0.98] transition-all text-left shadow-md shadow-[#120E16]/50 min-h-[96px]"
       >
         <div className="flex items-center justify-between w-full">
-          <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-105 transition-transform">
-            <ArrowRight className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-2xl bg-[#3C2E49] border border-[#554653] flex items-center justify-center text-[#9B97A2] group-hover:scale-105 group-hover:bg-[#4C3A5C] transition-all">
+            <ArrowRight className="w-4 h-4 text-[#F8F0E7]" />
           </div>
-          <span className="text-[10px] font-mono text-cyan-500 font-medium">
+          <span className="text-[10px] font-mono text-[#9B97A2] font-medium">
             Ethio Telecom
           </span>
         </div>
-        <div className="mt-2">
-          <div className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">
+        <div className="mt-2.5">
+          <div className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
             Send Telebirr
           </div>
-          <div className="text-[11px] text-neutral-400">
+          <div className="text-[11px] text-[#9B97A2]">
             ETB to Mobile Account
           </div>
         </div>

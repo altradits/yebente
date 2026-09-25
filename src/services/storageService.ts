@@ -4,88 +4,56 @@ const WALLET_STORAGE_KEY = 'altradits_user_wallet_v1';
 const TXS_STORAGE_KEY = 'altradits_transactions_v1';
 
 export const DEFAULT_WALLET: UserWallet = {
+  isConnected: false,
   type: 'custodial',
-  btcBalance: 0.04825,
-  mpesaBalanceKes: 48500,
-  telebirrBalanceEtb: 42000,
-  nonCustodialAddress: 'bc1q9x38n7c4g2lpxym56d2t8k0l09a2q8u9478f7e',
-  nonCustodialLabel: 'Hardware / Coldcard Key',
+  satsBalance: 0,
+  btcBalance: 0,
+  mpesaBalanceKes: 0,
+  telebirrBalanceEtb: 0,
+  nonCustodialAddress: '',
+  nonCustodialLabel: '',
+  insertedAt: Date.now(),
 };
 
-const INITIAL_TRANSACTIONS: Transaction[] = [
-  {
-    id: 'tx_001',
-    type: 'buy_btc',
-    title: 'Bought BTC via M-Pesa',
-    timestamp: Date.now() - 1000 * 60 * 42, // 42 mins ago
-    status: 'completed',
-    fromCurrency: 'KES',
-    fromAmount: 25000,
-    toCurrency: 'BTC',
-    toAmount: 0.00219,
-    rateUsed: 11415500,
-    fee: 150,
-    feeCurrency: 'KES',
-    recipient: 'In-App Custodial Vault',
-    referenceNumber: 'SAF-MP-TK89234812',
-    walletType: 'custodial',
-    note: 'Instant M-Pesa express checkout',
-  },
-  {
-    id: 'tx_002',
-    type: 'send_mpesa',
-    title: 'Sent M-Pesa Transfer',
-    timestamp: Date.now() - 1000 * 60 * 180, // 3 hours ago
-    status: 'completed',
-    fromCurrency: 'KES',
-    fromAmount: 5000,
-    fee: 28,
-    feeCurrency: 'KES',
-    recipient: '+254 712 345 678',
-    referenceNumber: 'SAF-MP-RJ77109241',
-    walletType: 'custodial',
-    note: 'Payment to Merchant / Till',
-  },
-  {
-    id: 'tx_003',
-    type: 'send_telebirr',
-    title: 'Sent Telebirr Transfer',
-    timestamp: Date.now() - 1000 * 60 * 60 * 12, // 12 hours ago
-    status: 'completed',
-    fromCurrency: 'ETB',
-    fromAmount: 3500,
-    fee: 5,
-    feeCurrency: 'ETB',
-    recipient: '+251 911 234 567',
-    referenceNumber: 'ETHIO-TB-8941092834',
-    walletType: 'custodial',
-    note: 'Family remittance Addis Ababa',
-  },
-  {
-    id: 'tx_004',
-    type: 'sell_btc',
-    title: 'Sold BTC to M-Pesa',
-    timestamp: Date.now() - 1000 * 60 * 60 * 36, // 1.5 days ago
-    status: 'completed',
-    fromCurrency: 'BTC',
-    fromAmount: 0.005,
-    toCurrency: 'KES',
-    toAmount: 56900,
-    rateUsed: 11380000,
-    fee: 0.00002,
-    feeCurrency: 'BTC',
-    recipient: '+254 722 987 654',
-    referenceNumber: 'BTC-TX-98fa71d3c01',
-    walletType: 'custodial',
-    note: 'Cash out to Safaricom line',
-  },
-];
+export const DISCONNECTED_WALLET: UserWallet = {
+  isConnected: false,
+  type: 'non-custodial',
+  satsBalance: 0,
+  btcBalance: 0,
+  mpesaBalanceKes: 0,
+  telebirrBalanceEtb: 0,
+  nonCustodialAddress: '',
+  nonCustodialLabel: '',
+};
+
+const INITIAL_TRANSACTIONS: Transaction[] = [];
 
 export function getStoredWallet(): UserWallet {
   try {
     const raw = localStorage.getItem(WALLET_STORAGE_KEY);
     if (raw) {
-      return { ...DEFAULT_WALLET, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      // Clear legacy mock seed data if present in localStorage
+      if (parsed.nonCustodialAddress === 'bc1q9x38n7c4g2lpxym56d2t8k0l09a2q8u9478f7e') {
+        parsed.nonCustodialAddress = '';
+      }
+      if (parsed.satsBalance === 4825000 && parsed.mpesaBalanceKes === 48500) {
+        parsed.satsBalance = 0;
+        parsed.btcBalance = 0;
+        parsed.mpesaBalanceKes = 0;
+        parsed.telebirrBalanceEtb = 0;
+      }
+      const sats = typeof parsed.satsBalance === 'number'
+        ? parsed.satsBalance
+        : (typeof parsed.btcBalance === 'number' && parsed.btcBalance > 0
+          ? Math.round(parsed.btcBalance * 100_000_000)
+          : 0);
+      return {
+        ...DEFAULT_WALLET,
+        ...parsed,
+        satsBalance: sats,
+        btcBalance: sats / 100_000_000,
+      };
     }
   } catch {
     // fallback
@@ -101,13 +69,31 @@ export function saveStoredWallet(wallet: UserWallet): void {
   }
 }
 
+export function ejectWallet(currentWallet: UserWallet): UserWallet {
+  const ejected: UserWallet = {
+    ...currentWallet,
+    isConnected: false,
+  };
+  saveStoredWallet(ejected);
+  return ejected;
+}
+
+export function wipeWallet(): UserWallet {
+  try {
+    localStorage.removeItem(WALLET_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+  return { ...DISCONNECTED_WALLET };
+}
+
 export function getStoredTransactions(): Transaction[] {
   try {
     const raw = localStorage.getItem(TXS_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((t: Transaction) => !['tx_001', 'tx_002', 'tx_003', 'tx_004'].includes(t.id));
       }
     }
   } catch {
@@ -140,8 +126,10 @@ export function addTransaction(
   if (newTx.walletType === 'custodial') {
     switch (newTx.type) {
       case 'buy_btc':
-        if (newTx.toCurrency === 'BTC' && newTx.toAmount) {
-          updatedWallet.btcBalance += newTx.toAmount;
+        if ((newTx.toCurrency === 'SATS' || newTx.toCurrency === 'BTC') && newTx.toAmount) {
+          const satsToAdd = newTx.toCurrency === 'BTC' ? Math.round(newTx.toAmount * 100_000_000) : newTx.toAmount;
+          updatedWallet.satsBalance = (updatedWallet.satsBalance || 0) + satsToAdd;
+          updatedWallet.btcBalance = updatedWallet.satsBalance / 100_000_000;
         }
         if (newTx.fromCurrency === 'KES') {
           updatedWallet.mpesaBalanceKes = Math.max(0, updatedWallet.mpesaBalanceKes - (newTx.fromAmount + newTx.fee));
@@ -151,8 +139,11 @@ export function addTransaction(
         break;
 
       case 'sell_btc':
-        if (newTx.fromCurrency === 'BTC') {
-          updatedWallet.btcBalance = Math.max(0, updatedWallet.btcBalance - (newTx.fromAmount + (newTx.feeCurrency === 'BTC' ? newTx.fee : 0)));
+        if (newTx.fromCurrency === 'SATS' || newTx.fromCurrency === 'BTC') {
+          const satsDeduct = newTx.fromCurrency === 'BTC' ? Math.round(newTx.fromAmount * 100_000_000) : newTx.fromAmount;
+          const feeSats = newTx.feeCurrency === 'SATS' ? newTx.fee : (newTx.feeCurrency === 'BTC' ? Math.round(newTx.fee * 100_000_000) : 0);
+          updatedWallet.satsBalance = Math.max(0, (updatedWallet.satsBalance || 0) - (satsDeduct + feeSats));
+          updatedWallet.btcBalance = updatedWallet.satsBalance / 100_000_000;
         }
         if (newTx.toCurrency === 'KES' && newTx.toAmount) {
           updatedWallet.mpesaBalanceKes += newTx.toAmount;

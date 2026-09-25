@@ -1,6 +1,6 @@
 export type WalletType = 'custodial' | 'non-custodial';
 
-export type Currency = 'BTC' | 'KES' | 'ETB' | 'USD';
+export type Currency = 'SATS' | 'BTC' | 'KES' | 'ETB' | 'USD';
 
 export type TransactionType = 'buy_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr';
 
@@ -20,14 +20,19 @@ export interface ExchangeRates {
 }
 
 export interface UserWallet {
+  isConnected: boolean;
   type: WalletType;
   // Balances
-  btcBalance: number;
+  satsBalance: number;
+  btcBalance?: number;
   mpesaBalanceKes: number;
   telebirrBalanceEtb: number;
   // Non-custodial details
   nonCustodialAddress: string;
   nonCustodialLabel?: string;
+  insertedAt?: number;
+  lastSyncedAt?: number;
+  onChainVerified?: boolean;
 }
 
 export interface Transaction {
