@@ -77,9 +77,16 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
           return;
         }
 
-        refCode = res.referenceNumber || `SAF${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+        if (!res.referenceNumber) {
+          setErrorMessage('M-Pesa payout was submitted but no transaction reference was returned by Safaricom.');
+          setStep('error');
+          return;
+        }
+        refCode = res.referenceNumber;
       } else {
-        refCode = `ETHIO-TB-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+        setErrorMessage('Telebirr payout integration is not yet active. The developer must configure Telebirr API credentials (Issue #5).');
+        setStep('error');
+        return;
       }
 
       onSuccess({

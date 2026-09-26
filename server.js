@@ -96,15 +96,32 @@ app.post('/api/mpesa/stkpush', async (req, res) => {
     const { phone, amount, accountReference, transactionDesc } = req.body;
 
     if (!phone || !amount || Number(amount) <= 0) {
-      return res.status(400).json({ error: 'Valid phone and amount are required.' });
+      return res.status(400).json({ success: false, error: 'Valid phone and amount are required.' });
     }
 
-    const shortcode = process.env.MPESA_SHORTCODE || '174379'; // Sandbox default shortcode
+    const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
-    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+    const callbackUrl = process.env.MPESA_CALLBACK_URL;
+
+    if (!shortcode) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Push failed: MPESA_SHORTCODE is not configured in .env. Specify your Safaricom Paybill or Till shortcode.',
+      });
+    }
 
     if (!passkey) {
-      return res.status(500).json({ error: 'MPESA_PASSKEY is not configured.' });
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Push failed: MPESA_PASSKEY is not configured in .env. Obtain passkey from Safaricom Developer Portal.',
+      });
+    }
+
+    if (!callbackUrl) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Push failed: MPESA_CALLBACK_URL is not configured in .env. Safaricom requires a publicly accessible HTTPS webhook URL to deliver payment confirmation.',
+      });
     }
 
     const accessToken = await getDarajaAccessToken();
@@ -169,7 +186,7 @@ app.post('/api/mpesa/query', async (req, res) => {
     const { checkoutRequestId } = req.body;
 
     if (!checkoutRequestId) {
-      return res.status(400).json({ error: 'checkoutRequestId is required.' });
+      return res.status(400).json({ success: false, error: 'checkoutRequestId is required.' });
     }
 
     if (recentCallbacks.has(checkoutRequestId)) {
@@ -185,11 +202,14 @@ app.post('/api/mpesa/query', async (req, res) => {
       });
     }
 
-    const shortcode = process.env.MPESA_SHORTCODE || '174379';
+    const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
 
-    if (!passkey) {
-      return res.status(500).json({ error: 'MPESA_PASSKEY is not configured.' });
+    if (!shortcode || !passkey) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Query failed: MPESA_SHORTCODE and MPESA_PASSKEY must be configured in .env.',
+      });
     }
 
     const accessToken = await getDarajaAccessToken();
@@ -231,33 +251,6 @@ app.post('/api/mpesa/query', async (req, res) => {
   }
 });
 
-/**
- * Recipient Name Resolver for Safaricom M-Pesa
- */
-const KNOWN_SANDBOX_RECIPIENTS = {
-  '254708374149': 'MARY WANJIRU NJOROGE',
-  '254700000000': 'PETER KIPROP KEMBOI',
-  '254712345678': 'JOHN KAMAU MAINA',
-  '254722000000': 'SAFARICOM TEST RECIPIENT',
-  '254740123456': 'FAITH AKINYI OCHIENG',
-  '254790654321': 'BRIAN KIPCHUMBA BETT',
-};
-
-const KENYAN_FIRST_NAMES = ['JOSEPH', 'JAMES', 'JOHN', 'MARY', 'FAITH', 'ESTHER', 'GRACE', 'BRIAN', 'PETER', 'KEVIN', 'DANIEL', 'SARAH', 'MERCY', 'BEATRICE'];
-const KENYAN_MIDDLE_NAMES = ['KIPROP', 'KIPCHIRCHIR', 'WANJIRU', 'KAMAU', 'MWANGI', 'OTIENO', 'MUTUA', 'OCHIENG', 'KIPROTICH', 'KARIUKI', 'NJOROGE', 'KIPKOECH'];
-const KENYAN_INITIALS = ['M.', 'K.', 'O.', 'N.', 'W.', 'B.', 'G.', 'A.'];
-
-function resolveRecipientName(phone) {
-  if (KNOWN_SANDBOX_RECIPIENTS[phone]) {
-    return KNOWN_SANDBOX_RECIPIENTS[phone];
-  }
-  const num = parseInt(phone.slice(-6), 10) || 123456;
-  const first = KENYAN_FIRST_NAMES[num % KENYAN_FIRST_NAMES.length];
-  const mid = KENYAN_MIDDLE_NAMES[(num >> 2) % KENYAN_MIDDLE_NAMES.length];
-  const init = KENYAN_INITIALS[(num >> 4) % KENYAN_INITIALS.length];
-  return `${first} ${mid} ${init}`;
-}
-
 const B2C_HAKIKISHA_URL =
   DARAJA_ENV === 'production'
     ? 'https://api.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha'
@@ -270,7 +263,7 @@ const C2B_HAKIKISHA_URL =
 
 /**
  * Safaricom B2C Hakikisha - Recipient Subscriber Name Verification
- * Queries https://sandbox.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha
+ * Queries Safaricom Daraja B2C Hakikisha endpoint. No fallback names.
  */
 app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
   try {
@@ -284,43 +277,74 @@ app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
       return res.status(400).json({
         success: false,
         verified: false,
-        error: 'Invalid Kenyan phone format. Must be 07XXXXXXXX or 01XXXXXXXX.',
+        error: 'Invalid Kenyan phone format. Must be a valid Safaricom subscriber number (07XXXXXXXX or 01XXXXXXXX).',
       });
     }
 
+    const initiator = process.env.MPESA_INITIATOR_NAME;
+    const security = process.env.MPESA_SECURITY_CREDENTIAL;
+    const shortcode = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
+
+    if (!initiator || !security) {
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        error: 'Safaricom B2C Hakikisha failed: MPESA_INITIATOR_NAME and MPESA_SECURITY_CREDENTIAL must be configured in .env. Obtain credentials from your Safaricom Daraja account.',
+      });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      requestID: `REQ${Date.now()}`,
+      timestamp: getTimestamp(),
+      msisdn: formatted,
+      shortcode: shortcode,
+    };
+
+    const response = await fetch(B2C_HAKIKISHA_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
     let hakikishaData = null;
     try {
-      const accessToken = await getDarajaAccessToken();
-      const payload = {
-        InitiatorName: process.env.MPESA_INITIATOR_NAME || 'testapi',
-        SecurityCredential: process.env.MPESA_SECURITY_CREDENTIAL || 'test',
-        CommandID: 'BusinessPayment',
-        PartyA: process.env.MPESA_SHORTCODE || '600000',
-        PartyB: formatted,
-        Remarks: 'Recipient Verification',
-      };
-
-      const response = await fetch(B2C_HAKIKISHA_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        hakikishaData = await response.json();
-      }
+      hakikishaData = text ? JSON.parse(text) : {};
     } catch {
-      // Upstream Hakikisha network or credential fallback
+      return res.status(response.status).json({
+        success: false,
+        verified: false,
+        error: `Safaricom B2C Hakikisha returned non-JSON response (${response.status}): ${text.slice(0, 200)}`,
+      });
+    }
+
+    if (!response.ok) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: hakikishaData.errorMessage || hakikishaData.ResponseDescription || hakikishaData.ResponseMessage || 'Safaricom B2C Hakikisha lookup failed.',
+        details: hakikishaData,
+      });
     }
 
     const resolvedName =
       hakikishaData?.CustomerName ||
       hakikishaData?.ReceiverName ||
       hakikishaData?.name ||
-      resolveRecipientName(formatted);
+      hakikishaData?.recipientName;
+
+    if (!resolvedName) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        error: `Safaricom subscriber name not found for phone +${formatted}. Upstream response: ${JSON.stringify(hakikishaData)}`,
+        details: hakikishaData,
+      });
+    }
 
     return res.json({
       success: true,
@@ -330,7 +354,8 @@ app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
       name: resolvedName,
       provider: 'Safaricom M-Pesa Hakikisha',
       accountStatus: 'Active',
-      upstreamVerified: Boolean(hakikishaData),
+      upstreamVerified: true,
+      details: hakikishaData,
     });
   } catch (error) {
     return res.status(500).json({
@@ -343,7 +368,7 @@ app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
 
 /**
  * Safaricom C2B Hakikisha - Paybill / Till Number Organization Verification
- * Queries https://api.safaricom.co.ke/c2b_hakikisha/v1/notify
+ * Queries Safaricom Daraja C2B Hakikisha endpoint. No fallback names.
  */
 app.post('/api/mpesa/hakikisha/c2b', async (req, res) => {
   try {
@@ -353,37 +378,53 @@ app.post('/api/mpesa/hakikisha/c2b', async (req, res) => {
     }
 
     const cleanShortcode = String(shortCode).trim();
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      ShortCode: cleanShortcode,
+      AccountNumber: accountNumber ? String(accountNumber).trim() : '',
+      PhoneNumber: phone ? formatKenyanPhone(phone) : '',
+    };
+
+    const response = await fetch(C2B_HAKIKISHA_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
     let hakikishaData = null;
-
     try {
-      const accessToken = await getDarajaAccessToken();
-      const payload = {
-        ShortCode: cleanShortcode,
-        AccountNumber: accountNumber ? String(accountNumber).trim() : '',
-        PhoneNumber: phone ? formatKenyanPhone(phone) : '',
-      };
-
-      const response = await fetch(C2B_HAKIKISHA_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        hakikishaData = await response.json();
-      }
+      hakikishaData = text ? JSON.parse(text) : {};
     } catch {
-      // Upstream Hakikisha fallback
+      return res.status(response.status).json({
+        success: false,
+        verified: false,
+        error: `Safaricom C2B Hakikisha returned non-JSON response (${response.status}): ${text.slice(0, 200)}`,
+      });
     }
 
-    const resolvedOrgName =
-      hakikishaData?.OrgName ||
-      hakikishaData?.BusinessName ||
-      hakikishaData?.name ||
-      (cleanShortcode === '174379' ? 'SAFARICOM DARAJA TEST' : `MERCHANT ${cleanShortcode}`);
+    if (!response.ok) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: hakikishaData.errorMessage || hakikishaData.ResponseDescription || hakikishaData.ResponseMessage || `Safaricom C2B Hakikisha lookup failed for ShortCode ${cleanShortcode}.`,
+        details: hakikishaData,
+      });
+    }
+
+    const resolvedOrgName = hakikishaData?.OrgName || hakikishaData?.BusinessName || hakikishaData?.name;
+
+    if (!resolvedOrgName) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        error: `Safaricom merchant not found for ShortCode ${cleanShortcode}. Ensure the shortcode is active on Safaricom Daraja.`,
+        details: hakikishaData,
+      });
+    }
 
     return res.json({
       success: true,
@@ -392,7 +433,7 @@ app.post('/api/mpesa/hakikisha/c2b', async (req, res) => {
       name: resolvedOrgName,
       accountNumber: accountNumber || '',
       provider: 'Safaricom M-Pesa C2B Hakikisha',
-      upstreamVerified: Boolean(hakikishaData),
+      upstreamVerified: true,
     });
   } catch (error) {
     return res.status(500).json({
@@ -411,6 +452,7 @@ app.post('/api/mpesa/verify-recipient', (req, res) => {
 
 /**
  * B2C Payout / Disburse Sats or KES to M-Pesa Phone Number
+ * Strictly queries Safaricom B2C API. No mock fallbacks.
  */
 app.post('/api/mpesa/payout', async (req, res) => {
   try {
@@ -424,64 +466,73 @@ app.post('/api/mpesa/payout', async (req, res) => {
     if (!/^254[71]\d{8}$/.test(formatted)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid Kenyan phone number. Must use Kenya country code +254.',
+        error: 'Invalid Kenyan phone number. Must use Kenya country code +254 (07XXXXXXXX or 01XXXXXXXX).',
       });
     }
 
     const b2cInitiator = process.env.MPESA_INITIATOR_NAME;
     const b2cSecurity = process.env.MPESA_SECURITY_CREDENTIAL;
     const b2cShortcode = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
+    const callbackUrl = process.env.MPESA_CALLBACK_URL;
 
-    const verifiedName = recipientName || resolveRecipientName(formatted);
-    const refCode = `SAF${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-
-    if (b2cInitiator && b2cSecurity && !b2cSecurity.startsWith('mock_') && b2cInitiator !== 'test_initiator') {
-      const accessToken = await getDarajaAccessToken();
-      const b2cPayload = {
-        InitiatorName: b2cInitiator,
-        SecurityCredential: b2cSecurity,
-        CommandID: 'BusinessPayment',
-        Amount: Math.round(Number(amount)),
-        PartyA: b2cShortcode,
-        PartyB: formatted,
-        Remarks: note || 'Bitcoin Sats Cashout',
-        QueueTimeOutURL: process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback',
-        ResultURL: process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback',
-        Occasion: 'Settlement',
-      };
-
-      const b2cResponse = await fetch(`${BASE_URL}/mpesa/b2c/v1/paymentrequest`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(b2cPayload),
+    if (!b2cInitiator || !b2cSecurity || !b2cShortcode) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa B2C Payout failed: Missing required B2C credentials. Configure MPESA_INITIATOR_NAME, MPESA_SECURITY_CREDENTIAL, and MPESA_B2C_SHORTCODE in .env, and ensure utility float is funded in the Safaricom B2C disbursement account.',
       });
+    }
 
-      const b2cData = await b2cResponse.json();
-      return res.json({
-        success: b2cResponse.ok,
-        referenceNumber: b2cData.ConversationID || refCode,
-        recipientName: verifiedName,
-        phone: formatted,
-        amount: Number(amount),
-        currency: currency || 'KES',
-        satsAmount: satsAmount || 0,
-        darajaResponse: b2cData,
+    if (!callbackUrl) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa B2C Payout failed: MPESA_CALLBACK_URL is not configured in .env. Safaricom requires a public HTTPS webhook URL to deliver disbursement confirmation.',
+      });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const b2cPayload = {
+      InitiatorName: b2cInitiator,
+      SecurityCredential: b2cSecurity,
+      CommandID: 'BusinessPayment',
+      Amount: Math.round(Number(amount)),
+      PartyA: b2cShortcode,
+      PartyB: formatted,
+      Remarks: note || 'Bitcoin Sats Cashout',
+      QueueTimeOutURL: callbackUrl,
+      ResultURL: callbackUrl,
+      Occasion: 'Settlement',
+    };
+
+    const b2cResponse = await fetch(`${BASE_URL}/mpesa/b2c/v1/paymentrequest`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(b2cPayload),
+    });
+
+    const b2cData = await b2cResponse.json();
+
+    if (!b2cResponse.ok || b2cData.ResponseCode !== '0') {
+      return res.status(400).json({
+        success: false,
+        error: b2cData.errorMessage || b2cData.ResponseDescription || 'Safaricom B2C payment request failed.',
+        details: b2cData,
       });
     }
 
     return res.json({
       success: true,
-      referenceNumber: refCode,
-      recipientName: verifiedName,
+      referenceNumber: b2cData.ConversationID || b2cData.OriginatorConversationID,
+      recipientName: recipientName || formatted,
       phone: formatted,
       amount: Number(amount),
       currency: currency || 'KES',
       satsAmount: satsAmount || 0,
-      status: 'completed',
-      message: `KES ${Number(amount).toLocaleString()} successfully sent to ${verifiedName} (+${formatted}).`,
+      status: 'submitted',
+      message: `M-Pesa payout dispatched successfully. ConversationID: ${b2cData.ConversationID}`,
+      darajaResponse: b2cData,
     });
   } catch (error) {
     return res.status(500).json({
@@ -551,55 +602,6 @@ app.get('/api/mpesa/callback/:checkoutRequestId', (req, res) => {
   res.json({
     success: true,
     callback,
-  });
-});
-
-/**
- * Simulate Webhook Callback (For Postman / Sandbox testing)
- */
-app.post('/api/mpesa/callback/simulate', (req, res) => {
-  const { checkoutRequestId, resultCode, resultDesc, amount, mpesaReceiptNumber, phone } = req.body;
-
-  if (!checkoutRequestId) {
-    return res.status(400).json({ success: false, error: 'checkoutRequestId is required for simulation.' });
-  }
-
-  const simulatedPayload = {
-    Body: {
-      stkCallback: {
-        MerchantRequestID: `MR-${Date.now()}`,
-        CheckoutRequestID: checkoutRequestId,
-        ResultCode: Number(resultCode ?? 0),
-        ResultDesc: resultDesc || (Number(resultCode ?? 0) === 0 ? 'The service request is processed successfully.' : 'Request cancelled by user.'),
-        CallbackMetadata: Number(resultCode ?? 0) === 0 ? {
-          Item: [
-            { Name: 'Amount', Value: Number(amount || 100) },
-            { Name: 'MpesaReceiptNumber', Value: mpesaReceiptNumber || `NL${Math.random().toString(36).substring(2, 8).toUpperCase()}` },
-            { Name: 'TransactionDate', Value: getTimestamp() },
-            { Name: 'PhoneNumber', Value: phone || 254708374149 },
-          ],
-        } : undefined,
-      },
-    },
-  };
-
-  const timestamp = new Date().toISOString();
-  const record = {
-    receivedAt: timestamp,
-    checkoutRequestId,
-    resultCode: Number(resultCode ?? 0),
-    resultDesc: simulatedPayload.Body.stkCallback.ResultDesc,
-    payload: simulatedPayload,
-    isSimulated: true,
-  };
-
-  recentCallbacks.set(checkoutRequestId, record);
-  callbackHistory.unshift(record);
-
-  res.json({
-    success: true,
-    message: `Simulated callback recorded for ${checkoutRequestId}`,
-    record,
   });
 });
 

@@ -25,7 +25,7 @@ interface SendMpesaModalProps {
   isOpen: boolean;
   onClose: () => void;
   wallet: UserWallet;
-  rates?: ExchangeRates;
+  rates: ExchangeRates;
   onSuccess: (tx: Omit<Transaction, 'id' | 'timestamp'>) => void;
 }
 
@@ -33,18 +33,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   isOpen,
   onClose,
   wallet,
-  rates = {
-    btcUsd: 88450,
-    btcKes: 11410050,
-    btcEtb: 11321600,
-    usdKes: 129.0,
-    usdEtb: 128.0,
-    change24hUsd: 2.45,
-    change24hKes: 2.38,
-    change24hEtb: 2.52,
-    lastUpdated: Date.now(),
-    isLive: true,
-  },
+  rates,
   onSuccess,
 }) => {
   const [fundingSource, setFundingSource] = useState<'sats' | 'kes'>('sats');
@@ -93,7 +82,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const availableKes = wallet.mpesaBalanceKes || 0;
 
   // Sats calculation if funding via Sats
-  const btcKesRate = rates.btcKes || 11410050;
+  const btcKesRate = rates.btcKes;
   const satsRequired = btcKesRate > 0 ? Math.round((numericAmount / btcKesRate) * 100_000_000) : 0;
   const satsFee = 250; // standard routing fee
 
@@ -131,6 +120,12 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const handleConfirm = async () => {
     if (numericAmount <= 0) return;
 
+    if (fundingSource === 'sats' && btcKesRate <= 0) {
+      setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats conversion.');
+      setStep('error');
+      return;
+    }
+
     if (recipientType === 'phone') {
       if (!phone || phone.length < 12) {
         setErrorMessage('Please enter a valid 9-digit Kenyan phone number.');
@@ -142,6 +137,10 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         setStep('error');
         return;
       }
+    } else {
+      setErrorMessage('Direct disbursement to Till and Paybill requires Safaricom B2B API credentials (MPESA_B2B_SHORTCODE). Only personal phone P2P transfers are currently supported.');
+      setStep('error');
+      return;
     }
 
     if (isInsufficientSats) {
@@ -160,11 +159,11 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
     setErrorMessage('');
 
     try {
-      const recipientName = verifiedInfo?.name || c2bVerified?.name || (recipientType === 'till' ? `Till ${tillNumber}` : `Paybill ${paybillNumber}`);
+      const recipientName = verifiedInfo?.name || formatKenyanDisplayPhone(phone);
       setConfirmedRecipientName(recipientName);
 
       const res = await sendMpesaPayout({
-        phone: recipientType === 'phone' ? phone : '254708374149',
+        phone,
         amount: numericAmount,
         currency: 'KES',
         satsAmount: fundingSource === 'sats' ? satsRequired : 0,
@@ -178,7 +177,13 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         return;
       }
 
-      const refCode = res.referenceNumber || `SAF${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      if (!res.referenceNumber) {
+        setErrorMessage('M-Pesa payout succeeded but no Safaricom transaction reference number was returned.');
+        setStep('error');
+        return;
+      }
+
+      const refCode = res.referenceNumber;
       setRealReference(refCode);
 
       if (fundingSource === 'sats') {
@@ -201,12 +206,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
       } else {
         onSuccess({
           type: 'send_mpesa',
-          title:
-            recipientType === 'phone'
-              ? 'Sent M-Pesa to Phone'
-              : recipientType === 'till'
-              ? 'M-Pesa Buy Goods (Till)'
-              : 'M-Pesa Paybill Payment',
+          title: 'Sent M-Pesa to Phone',
           status: 'completed',
           fromCurrency: 'KES',
           fromAmount: numericAmount,
@@ -215,7 +215,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
           recipient: getRecipientDisplay(),
           referenceNumber: refCode,
           walletType: wallet.type,
-          note: note || (recipientType === 'till' ? 'Merchant Payment' : 'P2P M-Pesa Transfer'),
+          note: note || 'P2P M-Pesa Transfer',
         });
       }
 

@@ -62,6 +62,12 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
       return;
     }
 
+    if (currentRate <= 0) {
+      setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats purchase.');
+      setStep('error');
+      return;
+    }
+
     setStep('processing');
     setErrorMessage('');
 
@@ -72,13 +78,13 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
       transactionDesc: 'Bitcoin Purchase',
     });
 
-    if (!res.success) {
-      setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt.');
+    if (!res.success || !res.checkoutRequestId) {
+      setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt: No CheckoutRequestID returned.');
       setStep('error');
       return;
     }
 
-    const refCode = res.checkoutRequestId || res.merchantRequestId || 'DARAJA-BUY-INIT';
+    const refCode = res.checkoutRequestId;
     setRealReference(refCode);
 
     onSuccess({

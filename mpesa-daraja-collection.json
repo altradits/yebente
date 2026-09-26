@@ -162,28 +162,6 @@
         },
         "description": "Lists all recent asynchronous webhook callbacks received by the bridge."
       }
-    },
-    {
-      "name": "8. Simulate Webhook Callback",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"checkoutRequestId\": \"{{checkoutRequestId}}\",\n  \"resultCode\": 0,\n  \"resultDesc\": \"The service request is processed successfully.\",\n  \"amount\": 10,\n  \"mpesaReceiptNumber\": \"NL78XYZ90\"\n}"
-        },
-        "url": {
-          "raw": "{{baseUrl}}/api/mpesa/callback/simulate",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "mpesa", "callback", "simulate"]
-        },
-        "description": "Simulates an incoming Safaricom payment confirmation callback in sandbox mode."
-      }
     }
   ]
 }

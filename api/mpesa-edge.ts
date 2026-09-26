@@ -229,34 +229,61 @@ export async function handleMpesaRequest(
           ? 'https://api.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha'
           : 'https://sandbox.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha';
 
-      let resolvedName = 'SAFARICOM SUBSCRIBER';
-      let upstream = false;
+      const initiator = getEnv('MPESA_INITIATOR_NAME', customEnv);
+      const security = getEnv('MPESA_SECURITY_CREDENTIAL', customEnv);
 
-      try {
-        const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
-        const res = await fetch(b2cUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            InitiatorName: getEnv('MPESA_INITIATOR_NAME', customEnv) || 'testapi',
-            SecurityCredential: getEnv('MPESA_SECURITY_CREDENTIAL', customEnv) || 'test',
-            CommandID: 'BusinessPayment',
-            PartyA: shortcode,
-            PartyB: formatted,
-            Remarks: 'Hakikisha Lookup',
+      if (!initiator || !security) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            verified: false,
+            error: 'Safaricom B2C Hakikisha requires MPESA_INITIATOR_NAME and MPESA_SECURITY_CREDENTIAL environment variables.',
           }),
-        });
+          { status: 500, headers: corsHeaders }
+        );
+      }
 
-        if (res.ok) {
-          const d = await res.json();
-          resolvedName = d.CustomerName || d.ReceiverName || d.name || resolvedName;
-          upstream = true;
-        }
-      } catch {
-        // Upstream fallback
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(b2cUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          InitiatorName: initiator,
+          SecurityCredential: security,
+          CommandID: 'BusinessPayment',
+          PartyA: shortcode,
+          PartyB: formatted,
+          Remarks: 'Hakikisha Lookup',
+        }),
+      });
+
+      const d = await res.json();
+      if (!res.ok) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            verified: false,
+            error: d.errorMessage || d.ResponseDescription || 'Safaricom B2C Hakikisha lookup failed.',
+            details: d,
+          }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const resolvedName = d.CustomerName || d.ReceiverName || d.name;
+      if (!resolvedName) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            verified: false,
+            error: `Safaricom subscriber not found for phone +${formatted}.`,
+            details: d,
+          }),
+          { status: 404, headers: corsHeaders }
+        );
       }
 
       return new Response(
@@ -266,7 +293,7 @@ export async function handleMpesaRequest(
           phone: formatted,
           name: resolvedName,
           provider: 'Safaricom M-Pesa Hakikisha',
-          upstreamVerified: upstream,
+          upstreamVerified: true,
         }),
         { headers: corsHeaders }
       );
@@ -277,36 +304,56 @@ export async function handleMpesaRequest(
       const body = await request.json();
       const code = String(body.shortCode || '').trim();
 
+      if (!code) {
+        return new Response(
+          JSON.stringify({ success: false, verified: false, error: 'ShortCode is required.' }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
       const c2bUrl =
         mpesaEnv === 'production'
           ? 'https://api.safaricom.co.ke/c2b_hakikisha/v1/notify'
           : 'https://sandbox.safaricom.co.ke/c2b_hakikisha/v1/notify';
 
-      let orgName = code === '174379' ? 'SAFARICOM DARAJA TEST' : `MERCHANT ${code}`;
-      let upstream = false;
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(c2bUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ShortCode: code,
+          AccountNumber: body.accountNumber || '',
+          PhoneNumber: body.phone ? formatKenyanPhone(body.phone) : '',
+        }),
+      });
 
-      try {
-        const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
-        const res = await fetch(c2bUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ShortCode: code,
-            AccountNumber: body.accountNumber || '',
-            PhoneNumber: body.phone ? formatKenyanPhone(body.phone) : '',
+      const d = await res.json();
+      if (!res.ok) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            verified: false,
+            error: d.errorMessage || d.ResponseDescription || `Safaricom C2B Hakikisha lookup failed for ShortCode ${code}.`,
+            details: d,
           }),
-        });
+          { status: 400, headers: corsHeaders }
+        );
+      }
 
-        if (res.ok) {
-          const d = await res.json();
-          orgName = d.OrgName || d.BusinessName || d.name || orgName;
-          upstream = true;
-        }
-      } catch {
-        // Upstream fallback
+      const orgName = d.OrgName || d.BusinessName || d.name;
+      if (!orgName) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            verified: false,
+            error: `Safaricom merchant not found for ShortCode ${code}. Ensure it is registered on Safaricom Daraja.`,
+            details: d,
+          }),
+          { status: 404, headers: corsHeaders }
+        );
       }
 
       return new Response(
@@ -317,7 +364,7 @@ export async function handleMpesaRequest(
           name: orgName,
           accountNumber: body.accountNumber || '',
           provider: 'Safaricom M-Pesa C2B Hakikisha',
-          upstreamVerified: upstream,
+          upstreamVerified: true,
         }),
         { headers: corsHeaders }
       );

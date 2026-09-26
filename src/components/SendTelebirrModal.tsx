@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserWallet, Transaction } from '../types';
-import { X, ArrowRight, Smartphone, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, ArrowRight, Smartphone, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 
 interface SendTelebirrModalProps {
   isOpen: boolean;
@@ -18,7 +18,8 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
   const [phone, setPhone] = useState<string>('');
   const [amountStr, setAmountStr] = useState<string>('');
   const [note, setNote] = useState<string>('');
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
   if (!isOpen) return null;
 
@@ -29,31 +30,13 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
 
   const handleConfirm = () => {
     if (numericAmount <= 0) return;
-    setStep('processing');
-
-    setTimeout(() => {
-      const refCode = `ETHIO-TB-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-
-      onSuccess({
-        type: 'send_telebirr',
-        title: 'Sent Telebirr Transfer',
-        status: 'completed',
-        fromCurrency: 'ETB',
-        fromAmount: numericAmount,
-        fee,
-        feeCurrency: 'ETB',
-        recipient: `+${phone}`,
-        referenceNumber: refCode,
-        walletType: wallet.type,
-        note: note || 'Telebirr Mobile Remittance',
-      });
-
-      setStep('success');
-    }, 1800);
+    setErrorMessage('Telebirr payment rail is not yet active. The developer must integrate Ethio Telecom Telebirr credentials (Issue #5) before live transfers can be dispatched.');
+    setStep('error');
   };
 
   const handleResetAndClose = () => {
     setStep('input');
+    setErrorMessage('');
     onClose();
   };
 
@@ -179,6 +162,25 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
                   : `Send ${numericAmount.toLocaleString()} ETB`}
               </button>
             </>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-red-950/30 border border-red-500/40 flex items-center justify-center text-red-400">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Telebirr Rail Inactive</h3>
+                <p className="text-xs text-red-300 mt-1 max-w-xs">{errorMessage}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Go Back
+              </button>
+            </div>
           )}
 
           {step === 'processing' && (
