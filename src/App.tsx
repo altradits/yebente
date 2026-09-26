@@ -23,7 +23,7 @@ import { ArrowDownLeft, ArrowUpRight, Send, ArrowRight } from 'lucide-react';
 
 export default function App() {
   const [wallet, setWallet] = useState<UserWallet>(getStoredWallet);
-  const [showBalanceSection, setShowBalanceSection] = useState(false);
+  const [showBalanceSection, setShowBalanceSection] = useState(wallet.isConnected);
   const [transactions, setTransactions] = useState<Transaction[]>(getStoredTransactions);
   const [rates, setRates] = useState<ExchangeRates>({
     btcUsd: 88450,
@@ -69,7 +69,7 @@ export default function App() {
   const handleUpdateWallet = (updated: UserWallet) => {
     setWallet(updated);
     saveStoredWallet(updated);
-    setShowBalanceSection(false);
+    setShowBalanceSection(true);
   };
 
   const handleEjectWallet = () => {
@@ -127,6 +127,7 @@ export default function App() {
               wallet={wallet}
               rates={rates}
               onOpenWalletSettings={() => setActiveModal('wallet_settings')}
+              onUpdateWallet={handleUpdateWallet}
               onEjectWallet={handleEjectWallet}
               onClose={() => setShowBalanceSection(false)}
             />

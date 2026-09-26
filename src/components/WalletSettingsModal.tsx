@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { UserWallet, WalletType } from '../types';
 import { fetchBitcoinAddressBalance, AddressBalanceResult } from '../services/blockchainService';
-import { queryWebLNBalance } from '../services/lightningService';
+import { queryWebLNBalance, isLightningAddress } from '../services/lightningService';
 import {
   X,
   ShieldCheck,
@@ -292,6 +292,11 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                   placeholder="0"
                   className="w-full bg-[#1F1728] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
                 />
+                {(onChainResult?.isLightning || isLightningAddress(address)) && (
+                  <p className="text-[10px] font-mono text-[#9B97A2] mt-1.5 leading-relaxed">
+                    Lightning protocols (LUD-16) do not disclose balances to public networks for user privacy. Enter your active wallet balance to track in yebente, or use WebLN auto-detect.
+                  </p>
+                )}
               </div>
 
               {/* Real M-Pesa Balance */}

@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates } from '../types';
-import { Copy, Check, Eye, EyeOff, ShieldCheck, KeyRound, LogOut, X } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, ShieldCheck, KeyRound, LogOut, X, RefreshCw } from 'lucide-react';
+import { queryWebLNBalance, isLightningAddress } from '../services/lightningService';
+import { fetchBitcoinAddressBalance } from '../services/blockchainService';
 
 interface BalanceCardProps {
   wallet: UserWallet;
   rates: ExchangeRates;
   onOpenWalletSettings: () => void;
+  onUpdateWallet?: (updated: UserWallet) => void;
   onEjectWallet?: () => void;
   onClose?: () => void;
 }
@@ -14,16 +17,58 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
   wallet,
   rates,
   onOpenWalletSettings,
+  onUpdateWallet,
   onEjectWallet,
   onClose,
 }) => {
   const [hideBalances, setHideBalances] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // If wallet is not connected / ejected, do not render balance card
   if (!wallet.isConnected) {
     return null;
   }
+
+  const handleSyncBalance = async () => {
+    if (!wallet.isConnected) return;
+    setIsSyncing(true);
+    try {
+      // 1. If WebLN is present in browser, auto-query it first
+      const weblnRes = await queryWebLNBalance();
+      if (weblnRes.available && typeof weblnRes.sats === 'number') {
+        if (onUpdateWallet) {
+          onUpdateWallet({
+            ...wallet,
+            satsBalance: weblnRes.sats,
+            btcBalance: weblnRes.sats / 100_000_000,
+            lastSyncedAt: Date.now(),
+          });
+        }
+        return;
+      }
+
+      // 2. If on-chain address is present, query blockchain indexers
+      if (wallet.nonCustodialAddress && !isLightningAddress(wallet.nonCustodialAddress)) {
+        const onChainRes = await fetchBitcoinAddressBalance(wallet.nonCustodialAddress);
+        if (onChainRes.success && onUpdateWallet) {
+          onUpdateWallet({
+            ...wallet,
+            satsBalance: onChainRes.sats,
+            btcBalance: onChainRes.sats / 100_000_000,
+            lastSyncedAt: Date.now(),
+            onChainVerified: true,
+          });
+          return;
+        }
+      }
+
+      // 3. For mobile Lightning addresses (like Wallet of Satoshi), open settings modal to update sats
+      onOpenWalletSettings();
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const sats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
   const btcEquiv = sats / 100_000_000;
@@ -62,6 +107,15 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             aria-label={hideBalances ? 'Show balance' : 'Hide balance'}
           >
             {hideBalances ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            onClick={handleSyncBalance}
+            disabled={isSyncing}
+            className="text-[#9B97A2] hover:text-[#F8F0E7] transition-colors p-0.5 disabled:opacity-50"
+            aria-label="Sync Sats Balance"
+            title="Sync Sats Balance"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#763698]' : ''}`} />
           </button>
         </div>
 
