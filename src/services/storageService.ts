@@ -93,13 +93,33 @@ export function getStoredTransactions(): Transaction[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((t: Transaction) => !['tx_001', 'tx_002', 'tx_003', 'tx_004'].includes(t.id));
+        return parsed.filter((t: Transaction) => {
+          if (!t || typeof t !== 'object') return false;
+          // Filter out legacy mock seed IDs
+          if (['tx_001', 'tx_002', 'tx_003', 'tx_004'].includes(t.id)) return false;
+          // Require a non-empty, authentic reference code
+          if (!t.referenceNumber || typeof t.referenceNumber !== 'string' || !t.referenceNumber.trim()) return false;
+          // Filter out any mock or simulated references
+          if (t.referenceNumber.includes('SIM-') || t.referenceNumber.includes('MOCK-') || t.referenceNumber.includes('FALLBACK')) return false;
+          // Ensure only completed transactions are preserved in history
+          if (t.status !== 'completed') return false;
+          return true;
+        });
       }
     }
   } catch {
     // fallback
   }
   return INITIAL_TRANSACTIONS;
+}
+
+export function clearStoredTransactions(): Transaction[] {
+  try {
+    localStorage.removeItem(TXS_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+  return [];
 }
 
 export function saveStoredTransactions(txs: Transaction[]): void {
@@ -116,8 +136,9 @@ export function addTransaction(
 ): { updatedWallet: UserWallet; updatedTransactions: Transaction[] } {
   const fullTx: Transaction = {
     ...newTx,
-    id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    id: `tx_${Date.now()}_${Date.now().toString(36).slice(-4)}`,
     timestamp: Date.now(),
+    status: 'completed',
   };
 
   const updatedWallet: UserWallet = { ...currentWallet };

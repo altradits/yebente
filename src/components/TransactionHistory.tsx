@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction, TransactionType } from '../types';
-import { Search, ArrowDownLeft, ArrowUpRight, Send, ArrowRight, ChevronRight, FileDown, Filter, ChevronDown } from 'lucide-react';
+import { Search, ArrowDownLeft, ArrowUpRight, Send, ArrowRight, ChevronRight, FileDown, Filter, ChevronDown, Trash2 } from 'lucide-react';
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
@@ -20,13 +20,32 @@ const FILTER_LABELS: Record<'all' | TransactionType, string> = {
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   transactions,
   onSelectTransaction,
+  onClearHistory,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | TransactionType>('all');
   const [isTabsOpen, setIsTabsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [confirmingClear, setConfirmingClear] = useState(false);
+
+  const handleClearClick = () => {
+    if (!confirmingClear) {
+      setConfirmingClear(true);
+      setTimeout(() => setConfirmingClear(false), 4000);
+      return;
+    }
+    setConfirmingClear(false);
+    if (onClearHistory) {
+      onClearHistory();
+    }
+  };
 
   const filteredTransactions = transactions.filter((tx) => {
+    if (!tx || typeof tx !== 'object') return false;
+    // Only real, complete transactions with valid references
+    if (tx.status !== 'completed') return false;
+    if (!tx.referenceNumber || !tx.referenceNumber.trim()) return false;
+
     if (activeFilter !== 'all' && tx.type !== activeFilter) {
       return false;
     }
@@ -119,11 +138,28 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </div>
         </button>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {!isCollapsed && transactions.length > 0 && onClearHistory && (
+            <button
+              type="button"
+              onClick={handleClearClick}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-mono transition-all active:scale-95 ${
+                confirmingClear
+                  ? 'bg-rose-950/70 border-rose-500/80 text-rose-300 font-bold'
+                  : 'bg-[#231A2D] border-[#3C2E49] hover:border-[#946069] text-[#D1B9B3] hover:text-[#F8F0E7]'
+              }`}
+              title={confirmingClear ? 'Click again to permanently clear all history' : 'Clear all transaction history'}
+            >
+              <Trash2 className="w-3 h-3 text-[#946069]" />
+              <span>{confirmingClear ? 'Confirm Clear?' : 'Clear'}</span>
+            </button>
+          )}
+
           {!isCollapsed && (
             <button
               onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698]/60 text-[11px] font-mono text-[#D1B9B3] hover:text-[#F8F0E7] transition-all"
+              disabled={transactions.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698]/60 text-[11px] font-mono text-[#D1B9B3] hover:text-[#F8F0E7] transition-all disabled:opacity-40"
               title="Export CSV"
             >
               <FileDown className="w-3 h-3 text-[#D1B9B3]" />

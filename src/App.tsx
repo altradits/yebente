@@ -5,6 +5,7 @@ import {
   getStoredWallet,
   saveStoredWallet,
   getStoredTransactions,
+  clearStoredTransactions,
   addTransaction,
   ejectWallet,
   wipeWallet,
@@ -104,6 +105,11 @@ export default function App() {
     setShowBalanceSection(true);
   };
 
+  const handleClearHistory = () => {
+    const cleared = clearStoredTransactions();
+    setTransactions(cleared);
+  };
+
   return (
     <div className="min-h-screen bg-[#120E16] text-[#F8F0E7] flex flex-col items-center justify-start p-0 md:p-6 select-none font-sans">
       {/* Outer Mobile Frame container or full width */}
@@ -158,6 +164,7 @@ export default function App() {
           <TransactionHistory
             transactions={transactions}
             onSelectTransaction={(tx) => setSelectedTx(tx)}
+            onClearHistory={handleClearHistory}
           />
         </main>
 
