@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle, Zap, Copy, Check } from 'lucide-react';
 import { initiateStkPush, isValidKenyanPhone } from '../services/mpesaService';
+import { isLightningAddress, resolveLightningAddress, createLightningInvoice } from '../services/lightningService';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
 
 interface BuyBtcModalProps {
@@ -25,6 +26,8 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [realReference, setRealReference] = useState<string>('');
+  const [lightningInvoice, setLightningInvoice] = useState<string>('');
+  const [copiedInvoice, setCopiedInvoice] = useState(false);
   const [destMode, setDestMode] = useState<'custodial' | 'external'>(
     wallet.type === 'non-custodial' ? 'external' : 'custodial'
   );
@@ -45,6 +48,14 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     setPhone('');
     setAmountFiat('');
     setErrorMessage('');
+  };
+
+  const handleCopyInvoice = () => {
+    if (lightningInvoice) {
+      navigator.clipboard.writeText(lightningInvoice);
+      setCopiedInvoice(true);
+      setTimeout(() => setCopiedInvoice(false), 2000);
+    }
   };
 
   const handleConfirm = async () => {
@@ -87,6 +98,20 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     const refCode = res.checkoutRequestId;
     setRealReference(refCode);
 
+    if (destMode === 'external' && externalAddress && isLightningAddress(externalAddress)) {
+      try {
+        const details = await resolveLightningAddress(externalAddress);
+        if (details.success && details.callbackUrl) {
+          const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Yebente Sats Purchase');
+          if (invRes.success && invRes.invoice) {
+            setLightningInvoice(invRes.invoice);
+          }
+        }
+      } catch {
+        // Safe fallback without interrupting purchase recording
+      }
+    }
+
     onSuccess({
       type: 'buy_btc',
       title: 'Bought Sats via M-Pesa',
@@ -101,7 +126,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
       recipient: destMode === 'custodial' ? 'In-App Custodial Wallet' : externalAddress,
       referenceNumber: refCode,
       walletType: destMode === 'custodial' ? 'custodial' : 'non-custodial',
-      note: `Daraja STK purchase to ${destMode === 'custodial' ? 'Custodial balance' : 'Self-custody on-chain'}`,
+      note: `Daraja STK purchase to ${destMode === 'custodial' ? 'Custodial balance' : (externalAddress || 'Self-custody')}`,
     });
 
     setStep('success');
@@ -110,6 +135,8 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const handleResetAndClose = () => {
     setStep('input');
     setErrorMessage('');
+    setLightningInvoice('');
+    setCopiedInvoice(false);
     onClose();
   };
 
@@ -331,6 +358,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                   <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Credited To</span>
+                  <span className="text-emerald-400 font-semibold">Yebente Portfolio (+{satsAmount.toLocaleString()} Sats)</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Paid Amount</span>
                   <span className="text-[#F8F0E7]">{numericFiat.toLocaleString()} {currencyCode}</span>
                 </div>
@@ -347,6 +378,36 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                   </div>
                 )}
               </div>
+
+              {lightningInvoice ? (
+                <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3 space-y-2 text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs text-[#D1B9B3] font-semibold">
+                      <Zap className="w-3.5 h-3.5 text-[#D1B9B3]" />
+                      <span>Wallet of Satoshi Invoice</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyInvoice}
+                      className="px-2 py-1 rounded-lg bg-[#231A2D] border border-[#3C2E49] text-[11px] font-mono text-[#9B97A2] hover:text-[#F8F0E7] flex items-center gap-1 transition-colors"
+                    >
+                      {copiedInvoice ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedInvoice ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <p className="font-mono text-[10px] text-[#9B97A2] break-all select-all bg-[#0E0A13] p-2 rounded-xl border border-[#2B2135]">
+                    {lightningInvoice}
+                  </p>
+                  <p className="text-[10px] text-[#9B97A2] leading-relaxed">
+                    Sats have been credited to your Yebente vault balance. Automated node settlement requires configuring LNBITS_URL or LND_REST_URL in .env.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-emerald-300 text-xs w-full text-left">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{satsAmount.toLocaleString()} Sats added to your Yebente balance.</span>
+                </div>
+              )}
 
               <button
                 type="button"

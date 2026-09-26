@@ -123,20 +123,20 @@ export function addTransaction(
   const updatedWallet: UserWallet = { ...currentWallet };
 
   // Adjust wallet balances according to transaction type
-  if (newTx.walletType === 'custodial') {
+  if (newTx.type === 'buy_btc') {
+    if ((newTx.toCurrency === 'SATS' || newTx.toCurrency === 'BTC') && newTx.toAmount) {
+      const satsToAdd = newTx.toCurrency === 'BTC' ? Math.round(newTx.toAmount * 100_000_000) : newTx.toAmount;
+      updatedWallet.satsBalance = (updatedWallet.satsBalance || 0) + satsToAdd;
+      updatedWallet.btcBalance = updatedWallet.satsBalance / 100_000_000;
+      updatedWallet.lastSyncedAt = Date.now();
+    }
+    if (newTx.fromCurrency === 'KES') {
+      updatedWallet.mpesaBalanceKes = Math.max(0, (updatedWallet.mpesaBalanceKes || 0) - (newTx.fromAmount + newTx.fee));
+    } else if (newTx.fromCurrency === 'ETB') {
+      updatedWallet.telebirrBalanceEtb = Math.max(0, (updatedWallet.telebirrBalanceEtb || 0) - (newTx.fromAmount + newTx.fee));
+    }
+  } else if (newTx.walletType === 'custodial') {
     switch (newTx.type) {
-      case 'buy_btc':
-        if ((newTx.toCurrency === 'SATS' || newTx.toCurrency === 'BTC') && newTx.toAmount) {
-          const satsToAdd = newTx.toCurrency === 'BTC' ? Math.round(newTx.toAmount * 100_000_000) : newTx.toAmount;
-          updatedWallet.satsBalance = (updatedWallet.satsBalance || 0) + satsToAdd;
-          updatedWallet.btcBalance = updatedWallet.satsBalance / 100_000_000;
-        }
-        if (newTx.fromCurrency === 'KES') {
-          updatedWallet.mpesaBalanceKes = Math.max(0, updatedWallet.mpesaBalanceKes - (newTx.fromAmount + newTx.fee));
-        } else if (newTx.fromCurrency === 'ETB') {
-          updatedWallet.telebirrBalanceEtb = Math.max(0, updatedWallet.telebirrBalanceEtb - (newTx.fromAmount + newTx.fee));
-        }
-        break;
 
       case 'sell_btc':
         if (newTx.fromCurrency === 'SATS' || newTx.fromCurrency === 'BTC') {

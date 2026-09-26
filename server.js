@@ -555,6 +555,106 @@ app.post('/api/mpesa/payout', async (req, res) => {
 });
 
 /**
+ * Lightning Network Settlement / Disbursement Endpoint
+ * Routes a BOLT-11 Lightning payment to external wallets (Wallet of Satoshi, Blink, etc.)
+ * via an LNbits or LND node when configured.
+ */
+app.post('/api/lightning/disburse', async (req, res) => {
+  try {
+    const { invoice, satsAmount, destination } = req.body;
+
+    if (!invoice) {
+      return res.status(400).json({
+        success: false,
+        error: 'BOLT-11 invoice string is required for Lightning disbursement.',
+      });
+    }
+
+    const lnbitsUrl = process.env.LNBITS_URL;
+    const lnbitsAdminKey = process.env.LNBITS_ADMIN_KEY;
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON;
+
+    // 1. If LNbits is configured
+    if (lnbitsUrl && lnbitsAdminKey) {
+      const cleanUrl = lnbitsUrl.replace(/\/+$/, '');
+      const payRes = await fetch(`${cleanUrl}/api/v1/payments`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': lnbitsAdminKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ out: true, bolt11: invoice }),
+      });
+
+      const payData = await payRes.json();
+      if (!payRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: payData.detail || payData.message || 'LNbits failed to route Lightning payment.',
+          details: payData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: true,
+        paymentHash: payData.payment_hash,
+        satsAmount: Number(satsAmount) || 0,
+        destination: destination || '',
+        message: 'Lightning payment settled successfully via LNbits node.',
+      });
+    }
+
+    // 2. If LND is configured
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const lndRes = await fetch(`${cleanUrl}/v1/channels/transactions`, {
+        method: 'POST',
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ payment_request: invoice }),
+      });
+
+      const lndData = await lndRes.json();
+      if (!lndRes.ok || lndData.payment_error) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.payment_error || 'LND failed to route Lightning payment.',
+          details: lndData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: true,
+        paymentHash: lndData.payment_hash,
+        satsAmount: Number(satsAmount) || 0,
+        destination: destination || '',
+        message: 'Lightning payment settled successfully via LND node.',
+      });
+    }
+
+    // 3. If no Lightning node is configured in environment
+    return res.status(501).json({
+      success: false,
+      settled: false,
+      configured: false,
+      error: 'Lightning disbursement node is not configured. To enable automated settlement to external Lightning wallets (such as Wallet of Satoshi), configure LNBITS_URL & LNBITS_ADMIN_KEY (or LND_REST_URL & LND_MACAROON) in .env.',
+      invoice,
+      satsAmount: Number(satsAmount) || 0,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error processing Lightning disbursement.',
+    });
+  }
+});
+
+/**
  * Asynchronous Callback Webhook Receiver
  * Safaricom invokes this endpoint when payment processing finishes
  */

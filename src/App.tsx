@@ -101,6 +101,7 @@ export default function App() {
     const { updatedWallet, updatedTransactions } = addTransaction(txData, wallet);
     setWallet(updatedWallet);
     setTransactions(updatedTransactions);
+    setShowBalanceSection(true);
   };
 
   return (
