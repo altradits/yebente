@@ -15,6 +15,10 @@ const BASE_URL =
     ? 'https://api.safaricom.co.ke'
     : 'https://sandbox.safaricom.co.ke';
 
+// In-memory store for webhook callbacks
+const recentCallbacks = new Map();
+const callbackHistory = [];
+
 /**
  * Format phone number to Safaricom standard: 2547XXXXXXXX or 2541XXXXXXXX
  */
@@ -168,6 +172,19 @@ app.post('/api/mpesa/query', async (req, res) => {
       return res.status(400).json({ error: 'checkoutRequestId is required.' });
     }
 
+    if (recentCallbacks.has(checkoutRequestId)) {
+      const cb = recentCallbacks.get(checkoutRequestId);
+      return res.json({
+        success: true,
+        source: 'callback',
+        responseCode: '0',
+        resultCode: cb.resultCode,
+        resultDesc: cb.resultDesc,
+        checkoutRequestId,
+        details: cb.payload,
+      });
+    }
+
     const shortcode = process.env.MPESA_SHORTCODE || '174379';
     const passkey = process.env.MPESA_PASSKEY;
 
@@ -199,6 +216,7 @@ app.post('/api/mpesa/query', async (req, res) => {
 
     return res.json({
       success: response.ok,
+      source: 'daraja_query',
       responseCode: data.ResponseCode,
       resultCode: data.ResultCode,
       resultDesc: data.ResultDesc,
@@ -475,10 +493,114 @@ app.post('/api/mpesa/payout', async (req, res) => {
 
 /**
  * Asynchronous Callback Webhook Receiver
+ * Safaricom invokes this endpoint when payment processing finishes
  */
 app.post('/api/mpesa/callback', (req, res) => {
-  // Webhook receiver for real-time Safaricom callback payloads
+  const body = req.body;
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] Safaricom Webhook Callback Received:`, JSON.stringify(body));
+
+  const stkCallback = body?.Body?.stkCallback;
+  const checkoutRequestId = stkCallback?.CheckoutRequestID;
+  const resultCode = stkCallback?.ResultCode;
+  const resultDesc = stkCallback?.ResultDesc;
+
+  const record = {
+    receivedAt: timestamp,
+    checkoutRequestId: checkoutRequestId || body?.ConversationID || `CB-${Date.now()}`,
+    resultCode: resultCode ?? (body?.Result?.ResultCode ?? 0),
+    resultDesc: resultDesc || body?.Result?.ResultDesc || 'Processed',
+    payload: body,
+  };
+
+  if (checkoutRequestId) {
+    recentCallbacks.set(checkoutRequestId, record);
+  }
+  callbackHistory.unshift(record);
+  if (callbackHistory.length > 50) {
+    callbackHistory.pop();
+  }
+
+  // Safaricom requires a rapid HTTP 200 with ResultCode 0
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+});
+
+/**
+ * List recent webhook callbacks (for Postman/client testing)
+ */
+app.get('/api/mpesa/callbacks', (req, res) => {
+  res.json({
+    success: true,
+    count: callbackHistory.length,
+    callbacks: callbackHistory,
+  });
+});
+
+/**
+ * Get callback by checkoutRequestId
+ */
+app.get('/api/mpesa/callback/:checkoutRequestId', (req, res) => {
+  const { checkoutRequestId } = req.params;
+  const callback = recentCallbacks.get(checkoutRequestId);
+  if (!callback) {
+    return res.status(404).json({
+      success: false,
+      message: `No callback recorded for CheckoutRequestID: ${checkoutRequestId}`,
+    });
+  }
+  res.json({
+    success: true,
+    callback,
+  });
+});
+
+/**
+ * Simulate Webhook Callback (For Postman / Sandbox testing)
+ */
+app.post('/api/mpesa/callback/simulate', (req, res) => {
+  const { checkoutRequestId, resultCode, resultDesc, amount, mpesaReceiptNumber, phone } = req.body;
+
+  if (!checkoutRequestId) {
+    return res.status(400).json({ success: false, error: 'checkoutRequestId is required for simulation.' });
+  }
+
+  const simulatedPayload = {
+    Body: {
+      stkCallback: {
+        MerchantRequestID: `MR-${Date.now()}`,
+        CheckoutRequestID: checkoutRequestId,
+        ResultCode: Number(resultCode ?? 0),
+        ResultDesc: resultDesc || (Number(resultCode ?? 0) === 0 ? 'The service request is processed successfully.' : 'Request cancelled by user.'),
+        CallbackMetadata: Number(resultCode ?? 0) === 0 ? {
+          Item: [
+            { Name: 'Amount', Value: Number(amount || 100) },
+            { Name: 'MpesaReceiptNumber', Value: mpesaReceiptNumber || `NL${Math.random().toString(36).substring(2, 8).toUpperCase()}` },
+            { Name: 'TransactionDate', Value: getTimestamp() },
+            { Name: 'PhoneNumber', Value: phone || 254708374149 },
+          ],
+        } : undefined,
+      },
+    },
+  };
+
+  const timestamp = new Date().toISOString();
+  const record = {
+    receivedAt: timestamp,
+    checkoutRequestId,
+    resultCode: Number(resultCode ?? 0),
+    resultDesc: simulatedPayload.Body.stkCallback.ResultDesc,
+    payload: simulatedPayload,
+    isSimulated: true,
+  };
+
+  recentCallbacks.set(checkoutRequestId, record);
+  callbackHistory.unshift(record);
+
+  res.json({
+    success: true,
+    message: `Simulated callback recorded for ${checkoutRequestId}`,
+    record,
+  });
 });
 
 app.listen(PORT, () => {

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, ShieldCheck } from 'lucide-react';
+import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
-import { formatKenyanDisplayPhone, VerifyRecipientResponse } from '../services/mpesaService';
+import { formatKenyanDisplayPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
 
 interface SellBtcModalProps {
   isOpen: boolean;
@@ -27,7 +27,8 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const [sourceMode, setSourceMode] = useState<'custodial' | 'external'>(
     wallet.type === 'non-custodial' ? 'external' : 'custodial'
   );
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const [copiedEscrow, setCopiedEscrow] = useState(false);
 
   if (!isOpen) return null;
@@ -44,6 +45,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const handleDestinationChange = (newDest: 'mpesa' | 'telebirr') => {
     setDestination(newDest);
     setPhone('');
+    setErrorMessage('');
   };
 
   const handleCopyEscrow = () => {
@@ -52,15 +54,33 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
     setTimeout(() => setCopiedEscrow(false), 2000);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (numericSats <= 0) return;
     setStep('processing');
+    setErrorMessage('');
 
-    setTimeout(() => {
-      const refCode =
-        destination === 'mpesa'
-          ? `SAF-MP-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
-          : `ETHIO-TB-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    try {
+      let refCode = '';
+      if (destination === 'mpesa') {
+        const res = await sendMpesaPayout({
+          phone,
+          amount: Math.round(fiatPayout),
+          currency: 'KES',
+          satsAmount: numericSats,
+          recipientName: recipientName || verifiedInfo?.name,
+          note: 'Sats Cashout to M-Pesa',
+        });
+
+        if (!res.success) {
+          setErrorMessage(res.error || 'Failed to dispatch M-Pesa payout.');
+          setStep('error');
+          return;
+        }
+
+        refCode = res.referenceNumber || `SAF${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      } else {
+        refCode = `ETHIO-TB-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+      }
 
       onSuccess({
         type: 'sell_btc',
@@ -73,18 +93,22 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
         rateUsed: currentRate,
         fee: satsFee,
         feeCurrency: 'SATS',
-        recipient: `+${phone} (${recipientName})`,
+        recipient: `+${phone} (${recipientName || verifiedInfo?.name || 'Recipient'})`,
         referenceNumber: refCode,
         walletType: sourceMode === 'custodial' ? 'custodial' : 'non-custodial',
         note: `Direct payout to ${destination === 'mpesa' ? 'M-Pesa' : 'Telebirr'} mobile account`,
       });
 
       setStep('success');
-    }, 2200);
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Error processing payout.');
+      setStep('error');
+    }
   };
 
   const handleResetAndClose = () => {
     setStep('input');
+    setErrorMessage('');
     onClose();
   };
 
@@ -262,19 +286,6 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                         label="M-Pesa Recipient Phone"
                         autoVerify={false}
                       />
-
-                      {!phone && (
-                        <div className="flex items-center justify-between text-[11px] text-[#9B97A2] px-1 pt-0.5">
-                          <span>Testing cashout?</span>
-                          <button
-                            type="button"
-                            onClick={() => setPhone('254708374149')}
-                            className="text-emerald-400 hover:text-emerald-300 font-mono text-[10px] underline"
-                          >
-                            Fill Sandbox Number (0708 374 149)
-                          </button>
-                        </div>
-                      )}
                     </div>
 
                     {(!verifiedInfo || !verifiedInfo.verified) && (
@@ -346,6 +357,25 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-[#F8F0E7]">Broadcasting Liquidation</h3>
               </div>
+            </div>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-red-950/30 border border-red-500/40 flex items-center justify-center text-red-400">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Payout Failed</h3>
+                <p className="text-xs text-red-300 mt-1 max-w-xs">{errorMessage}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Try Again
+              </button>
             </div>
           )}
 
