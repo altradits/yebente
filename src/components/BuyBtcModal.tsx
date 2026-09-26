@@ -200,8 +200,8 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               <div>
                 <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
                   <span className="font-semibold">You Pay</span>
-                  <span className="font-mono text-[#9B97A2]">
-                    Avail: {source === 'mpesa' ? `${wallet.mpesaBalanceKes.toLocaleString()} KES` : `${wallet.telebirrBalanceEtb.toLocaleString()} ETB`}
+                  <span className="font-mono text-[11px] text-[#D1B9B3]">
+                    {source === 'mpesa' ? 'Rail: Safaricom STK Push' : 'Rail: Ethio Telecom (Pending)'}
                   </span>
                 </div>
                 <div className="relative">

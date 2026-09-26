@@ -105,8 +105,8 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
               <div>
                 <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
                   <span className="font-semibold">Amount to Transfer</span>
-                  <span className="font-mono text-[#9B97A2]">
-                    Avail: {wallet.telebirrBalanceEtb.toLocaleString()} ETB
+                  <span className="font-mono text-[#9B97A2] text-[11px]">
+                    Rail: Ethio Telecom Telebirr
                   </span>
                 </div>
                 <div className="relative">
@@ -154,12 +154,10 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericAmount <= 0 || totalDeduction > wallet.telebirrBalanceEtb}
+                disabled={numericAmount <= 0}
                 className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
               >
-                {totalDeduction > wallet.telebirrBalanceEtb
-                  ? 'Insufficient Telebirr Balance'
-                  : `Send ${numericAmount.toLocaleString()} ETB`}
+                Send {numericAmount > 0 ? `${numericAmount.toLocaleString()} ETB` : 'ETB'}
               </button>
             </>
           )}

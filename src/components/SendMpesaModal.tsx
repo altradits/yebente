@@ -80,30 +80,14 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
 
   const numericAmount = parseFloat(amountStr) || 0;
   const availableSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
-  const availableKes = wallet.mpesaBalanceKes || 0;
 
-  // Sats calculation if funding via Sats
+  // Sats calculation for Sats funding
   const btcKesRate = rates.btcKes;
   const satsRequired = btcKesRate > 0 ? Math.round((numericAmount / btcKesRate) * 100_000_000) : 0;
   const satsFee = 250; // standard routing fee
 
-  // Realistic Safaricom M-Pesa tariff fee calculation for KES payments
-  const calculateMpesaFee = (amt: number): number => {
-    if (amt <= 100) return 0;
-    if (amt <= 500) return 7;
-    if (amt <= 1000) return 13;
-    if (amt <= 2500) return 23;
-    if (amt <= 5000) return 35;
-    if (amt <= 10000) return 57;
-    if (amt <= 20000) return 78;
-    return 108;
-  };
-
-  const kesFee = recipientType === 'till' ? 0 : calculateMpesaFee(numericAmount);
-
   // Check balance sufficiency
-  const isInsufficientSats = fundingSource === 'sats' && satsRequired + satsFee > availableSats;
-  const isInsufficientKes = fundingSource === 'kes' && numericAmount + kesFee > availableKes;
+  const isInsufficientSats = satsRequired + satsFee > availableSats;
 
   const getRecipientDisplay = () => {
     if (recipientType === 'phone') {
@@ -150,12 +134,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
       return;
     }
 
-    if (isInsufficientKes) {
-      setErrorMessage(`Insufficient M-Pesa KES balance. Required: KES ${(numericAmount + kesFee).toLocaleString()}, Available: KES ${availableKes.toLocaleString()}.`);
-      setStep('error');
-      return;
-    }
-
     setStep('processing');
     setErrorMessage('');
 
@@ -167,9 +145,9 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         phone,
         amount: numericAmount,
         currency: 'KES',
-        satsAmount: fundingSource === 'sats' ? satsRequired : 0,
+        satsAmount: satsRequired,
         recipientName,
-        note: note || (fundingSource === 'sats' ? 'Sats to M-Pesa Transfer' : 'M-Pesa P2P Transfer'),
+        note: note || 'Sats to M-Pesa Transfer',
       });
 
       if (!res.success) {
@@ -187,38 +165,22 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
       const refCode = res.referenceNumber;
       setRealReference(refCode);
 
-      if (fundingSource === 'sats') {
-        onSuccess({
-          type: 'send_mpesa',
-          title: `Sent Sats to M-Pesa (${formatKenyanDisplayPhone(phone)})`,
-          status: 'completed',
-          fromCurrency: 'SATS',
-          fromAmount: satsRequired,
-          toCurrency: 'KES',
-          toAmount: numericAmount,
-          fee: satsFee,
-          feeCurrency: 'SATS',
-          rateUsed: btcKesRate,
-          recipient: getRecipientDisplay(),
-          referenceNumber: refCode,
-          walletType: wallet.type,
-          note: note || `Sats cashout directly to ${recipientName} on M-Pesa`,
-        });
-      } else {
-        onSuccess({
-          type: 'send_mpesa',
-          title: 'Sent M-Pesa to Phone',
-          status: 'completed',
-          fromCurrency: 'KES',
-          fromAmount: numericAmount,
-          fee: kesFee,
-          feeCurrency: 'KES',
-          recipient: getRecipientDisplay(),
-          referenceNumber: refCode,
-          walletType: wallet.type,
-          note: note || 'P2P M-Pesa Transfer',
-        });
-      }
+      onSuccess({
+        type: 'send_mpesa',
+        title: `Sent Sats to M-Pesa (${formatKenyanDisplayPhone(phone)})`,
+        status: 'completed',
+        fromCurrency: 'SATS',
+        fromAmount: satsRequired,
+        toCurrency: 'KES',
+        toAmount: numericAmount,
+        fee: satsFee,
+        feeCurrency: 'SATS',
+        rateUsed: btcKesRate,
+        recipient: getRecipientDisplay(),
+        referenceNumber: refCode,
+        walletType: wallet.type,
+        note: note || `Sats cashout directly to ${recipientName} on M-Pesa`,
+      });
 
       setStep('success');
     } catch (err: unknown) {
@@ -259,51 +221,20 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <>
-              {/* Funding Source Selector: Sats vs KES */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Pay From Source
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFundingSource('sats')}
-                    className={`p-3 rounded-2xl border text-left transition-all ${
-                      fundingSource === 'sats'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7] shadow-sm shadow-[#763698]/20'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold flex items-center gap-1">
-                        <Zap className="w-3.5 h-3.5 text-amber-400" />
-                        Sats Balance
-                      </span>
-                    </div>
-                    <div className="font-mono text-[11px] text-[#D1B9B3]">
-                      {availableSats.toLocaleString()} Sats
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFundingSource('kes')}
-                    className={`p-3 rounded-2xl border text-left transition-all ${
-                      fundingSource === 'kes'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7] shadow-sm shadow-[#763698]/20'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold flex items-center gap-1">
-                        <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                        M-Pesa KES
-                      </span>
-                    </div>
-                    <div className="font-mono text-[11px] text-[#D1B9B3]">
-                      KES {availableKes.toLocaleString()}
-                    </div>
-                  </button>
+              {/* Funding Source Display */}
+              <div className="bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-xs font-semibold text-[#D1B9B3]">Funded via Sats Balance</span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-[#F8F0E7]">
+                    {availableSats.toLocaleString()} Sats
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono text-[#9B97A2] pt-1.5 border-t border-[#261D2E]">
+                  <span>Live Conversion:</span>
+                  <span>1 KES ≈ {btcKesRate > 0 ? (100_000_000 / btcKesRate).toFixed(1) : '0'} Sats</span>
                 </div>
               </div>
 
@@ -497,43 +428,22 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
 
               {/* Conversion and Fee Breakdown */}
               <div className="bg-[#140E1B]/90 border border-[#382B44] rounded-2xl p-3.5 space-y-2 text-xs">
-                {fundingSource === 'sats' ? (
-                  <>
-                    <div className="flex justify-between text-[#9B97A2]">
-                      <span>Sats To Deduct</span>
-                      <span className="font-mono font-bold text-[#F8F0E7]">
-                        ~{satsRequired.toLocaleString()} Sats
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-[#9B97A2]">
-                      <span>Lightning Routing Fee</span>
-                      <span className="font-mono">{satsFee} Sats</span>
-                    </div>
-                    <div className="flex justify-between text-[#D1B9B3] font-semibold border-t border-[#382B44] pt-2">
-                      <span>Total Sats Cost</span>
-                      <span className="font-mono text-[#F8F0E7] font-bold">
-                        {(satsRequired + satsFee).toLocaleString()} Sats
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex justify-between text-[#9B97A2]">
-                      <span>Transfer Amount</span>
-                      <span className="font-mono">KES {numericAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-[#9B97A2]">
-                      <span>M-Pesa Tariff Fee</span>
-                      <span className="font-mono">KES {kesFee}</span>
-                    </div>
-                    <div className="flex justify-between text-[#D1B9B3] font-semibold border-t border-[#382B44] pt-2">
-                      <span>Total Deduction</span>
-                      <span className="font-mono text-[#F8F0E7] font-bold">
-                        KES {(numericAmount + kesFee).toLocaleString()}
-                      </span>
-                    </div>
-                  </>
-                )}
+                <div className="flex justify-between text-[#9B97A2]">
+                  <span>Sats To Deduct</span>
+                  <span className="font-mono font-bold text-[#F8F0E7]">
+                    ~{satsRequired.toLocaleString()} Sats
+                  </span>
+                </div>
+                <div className="flex justify-between text-[#9B97A2]">
+                  <span>Lightning Routing Fee</span>
+                  <span className="font-mono">{satsFee} Sats</span>
+                </div>
+                <div className="flex justify-between text-[#D1B9B3] font-semibold border-t border-[#382B44] pt-2">
+                  <span>Total Sats Cost</span>
+                  <span className="font-mono text-[#F8F0E7] font-bold">
+                    {(satsRequired + satsFee).toLocaleString()} Sats
+                  </span>
+                </div>
               </div>
 
               {/* Optional Note */}
@@ -573,8 +483,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                   (recipientType === 'phone' && !isValidKenyanPhone(phone)) ||
                   (recipientType === 'till' && !tillNumber.trim()) ||
                   (recipientType === 'paybill' && (!paybillNumber.trim() || !accountNumber.trim())) ||
-                  isInsufficientSats ||
-                  isInsufficientKes
+                  isInsufficientSats
                 }
                 className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#763698] to-[#946069] hover:opacity-95 text-[#F8F0E7] text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#120E16]/80 disabled:opacity-50 transition-all active:scale-[0.99]"
               >
@@ -584,8 +493,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                     ? 'Enter Valid Kenyan Phone Number'
                     : isInsufficientSats
                     ? 'Insufficient Sats Balance'
-                    : isInsufficientKes
-                    ? 'Insufficient KES Balance'
                     : `Send KES ${numericAmount.toLocaleString()} to ${verifiedInfo?.name ? verifiedInfo.name.split(' ')[0] : 'Recipient'}`}
                 </span>
               </button>

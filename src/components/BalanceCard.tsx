@@ -201,31 +201,43 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         </div>
       )}
 
-      {/* Secondary Mobile Money Balances */}
+      {/* Payment Rails Status */}
       <div className="relative grid grid-cols-2 gap-2.5 pt-3.5 border-t border-[#372A42]">
-        {/* M-Pesa Balance Card */}
+        {/* M-Pesa Rail */}
         <div className="bg-[#150F1D]/80 rounded-2xl p-3 border border-[#3A2C46]">
           <div className="flex items-center justify-between text-[11px] mb-1">
             <span className="text-[#D1B9B3] font-semibold">
-              M-Pesa
+              M-Pesa Rail
             </span>
-            <span className="text-[#9B97A2] font-mono text-[10px]">KES</span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-1.5 py-0.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Active
+            </span>
           </div>
-          <div className="font-mono text-base font-bold text-[#F8F0E7] tabular-nums">
-            {hideBalances ? '••••••' : formatNumber(wallet.mpesaBalanceKes, 0)}
+          <div className="font-mono text-xs font-bold text-[#F8F0E7]">
+            Safaricom Direct
+          </div>
+          <div className="text-[10px] text-[#9B97A2] font-mono mt-0.5 truncate">
+            STK Push & B2C Rail
           </div>
         </div>
 
-        {/* Telebirr Balance Card */}
+        {/* Telebirr Rail */}
         <div className="bg-[#150F1D]/80 rounded-2xl p-3 border border-[#3A2C46]">
           <div className="flex items-center justify-between text-[11px] mb-1">
             <span className="text-[#946069] font-semibold">
-              Telebirr
+              Telebirr Rail
             </span>
-            <span className="text-[#9B97A2] font-mono text-[10px]">ETB</span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-400 bg-amber-950/40 border border-amber-500/30 px-1.5 py-0.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              Pending
+            </span>
           </div>
-          <div className="font-mono text-base font-bold text-[#F8F0E7] tabular-nums">
-            {hideBalances ? '••••••' : formatNumber(wallet.telebirrBalanceEtb, 0)}
+          <div className="font-mono text-xs font-bold text-[#D1B9B3]">
+            Ethio Telecom
+          </div>
+          <div className="text-[10px] text-[#9B97A2] font-mono mt-0.5 truncate">
+            Requires Issue #5
           </div>
         </div>
       </div>
