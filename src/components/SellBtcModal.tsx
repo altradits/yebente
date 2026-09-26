@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check } from 'lucide-react';
+import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, ShieldCheck } from 'lucide-react';
+import { KenyaPhoneInput } from './KenyaPhoneInput';
+import { formatKenyanDisplayPhone, VerifyRecipientResponse } from '../services/mpesaService';
 
 interface SellBtcModalProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const [satsAmountStr, setSatsAmountStr] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [recipientName, setRecipientName] = useState<string>('');
+  const [verifiedInfo, setVerifiedInfo] = useState<VerifyRecipientResponse | null>(null);
   const [sourceMode, setSourceMode] = useState<'custodial' | 'external'>(
     wallet.type === 'non-custodial' ? 'external' : 'custodial'
   );
@@ -243,46 +246,93 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
 
               {/* Recipient Phone & Name */}
               <div className="space-y-2.5">
-                <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    {destination === 'mpesa' ? 'M-Pesa Recipient Phone' : 'Telebirr Recipient Phone'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      onWheel={(e) => e.currentTarget.blur()}
-                      placeholder={destination === 'mpesa' ? '2547XXXXXXXX' : '2519XXXXXXXX'}
-                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                    />
-                    <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
-                  </div>
-                </div>
+                {destination === 'mpesa' ? (
+                  <>
+                    <div className="space-y-1">
+                      <KenyaPhoneInput
+                        value={phone}
+                        onChange={(full) => {
+                          setPhone(full);
+                          if (verifiedInfo) setVerifiedInfo(null);
+                        }}
+                        onVerifiedChange={(info) => {
+                          setVerifiedInfo(info);
+                          if (info?.name) setRecipientName(info.name);
+                        }}
+                        label="M-Pesa Recipient Phone"
+                        autoVerify={false}
+                      />
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    Registered Account Name
-                  </label>
-                  <input
-                    type="text"
-                    value={recipientName}
-                    onChange={(e) => setRecipientName(e.target.value)}
-                    placeholder="Recipient Full Name"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                </div>
+                      {!phone && (
+                        <div className="flex items-center justify-between text-[11px] text-[#9B97A2] px-1 pt-0.5">
+                          <span>Testing cashout?</span>
+                          <button
+                            type="button"
+                            onClick={() => setPhone('254708374149')}
+                            className="text-emerald-400 hover:text-emerald-300 font-mono text-[10px] underline"
+                          >
+                            Fill Sandbox Number (0708 374 149)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {(!verifiedInfo || !verifiedInfo.verified) && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-amber-300 text-[11px]">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                        <span>Receiver name must be verified on M-Pesa before payout can be initiated.</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
+                        Telebirr Recipient Phone
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="tel"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="2519XXXXXXXX"
+                          className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                        />
+                        <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
+                        Registered Account Name
+                      </label>
+                      <input
+                        type="text"
+                        value={recipientName}
+                        onChange={(e) => setRecipientName(e.target.value)}
+                        placeholder="Recipient Full Name"
+                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Submit CTA */}
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericSats <= 0 || (sourceMode === 'custodial' && numericSats > availableSats)}
+                disabled={
+                  numericSats <= 0 ||
+                  (sourceMode === 'custodial' && numericSats > availableSats) ||
+                  (destination === 'mpesa' && (!verifiedInfo || !verifiedInfo.verified))
+                }
                 className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
               >
                 {sourceMode === 'custodial' && numericSats > availableSats
                   ? 'Insufficient Sats Balance'
+                  : destination === 'mpesa' && (!verifiedInfo || !verifiedInfo.verified)
+                  ? 'Verify M-Pesa Receiver to Sell'
                   : `Confirm Sell for ${Math.round(fiatPayout).toLocaleString()} ${currencyCode}`}
               </button>
             </>

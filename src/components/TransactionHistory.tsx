@@ -14,6 +14,7 @@ const FILTER_LABELS: Record<'all' | TransactionType, string> = {
   sell_btc: 'Sell Sats',
   send_mpesa: 'M-Pesa',
   send_telebirr: 'Telebirr',
+  deposit_mpesa: 'Deposits',
 };
 
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
@@ -44,6 +45,8 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     switch (type) {
       case 'buy_btc':
         return <ArrowDownLeft className="w-4 h-4 text-[#D1B9B3]" />;
+      case 'deposit_mpesa':
+        return <ArrowDownLeft className="w-4 h-4 text-emerald-400" />;
       case 'sell_btc':
         return <ArrowUpRight className="w-4 h-4 text-[#946069]" />;
       case 'send_mpesa':

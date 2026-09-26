@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import { initiateStkPush, isValidKenyanPhone } from '../services/mpesaService';
+import { KenyaPhoneInput } from './KenyaPhoneInput';
 
 interface BuyBtcModalProps {
   isOpen: boolean;
@@ -246,20 +247,30 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
               {/* Mobile Phone for prompt */}
               <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  {source === 'mpesa' ? 'M-Pesa Phone Number' : 'Telebirr Phone Number'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="tel"
+                {source === 'mpesa' ? (
+                  <KenyaPhoneInput
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    onWheel={(e) => e.currentTarget.blur()}
-                    placeholder={source === 'mpesa' ? '2547XXXXXXXX' : '2519XXXXXXXX'}
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                    onChange={(full) => setPhone(full)}
+                    label="M-Pesa Phone (Safaricom Prompt)"
+                    autoVerify={false}
                   />
-                  <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
-                </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                      Telebirr Phone Number
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="2519XXXXXXXX"
+                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                      />
+                      <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Fees summary */}

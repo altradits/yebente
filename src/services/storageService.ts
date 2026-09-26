@@ -153,7 +153,19 @@ export function addTransaction(
         break;
 
       case 'send_mpesa':
-        updatedWallet.mpesaBalanceKes = Math.max(0, updatedWallet.mpesaBalanceKes - (newTx.fromAmount + newTx.fee));
+        if (newTx.fromCurrency === 'SATS') {
+          const satsDeduct = newTx.fromAmount;
+          const feeSats = newTx.feeCurrency === 'SATS' ? newTx.fee : 0;
+          updatedWallet.satsBalance = Math.max(0, (updatedWallet.satsBalance || 0) - (satsDeduct + feeSats));
+          updatedWallet.btcBalance = updatedWallet.satsBalance / 100_000_000;
+        } else {
+          updatedWallet.mpesaBalanceKes = Math.max(0, updatedWallet.mpesaBalanceKes - (newTx.fromAmount + newTx.fee));
+        }
+        break;
+
+      case 'deposit_mpesa':
+        const depositAmt = newTx.toAmount || newTx.fromAmount;
+        updatedWallet.mpesaBalanceKes = (updatedWallet.mpesaBalanceKes || 0) + depositAmt;
         break;
 
       case 'send_telebirr':
@@ -163,8 +175,13 @@ export function addTransaction(
   } else {
     // Non-custodial: if selling, external address sends BTC; if buying, BTC goes straight to external address.
     // If sending M-Pesa or Telebirr fiat, it deducts from mobile balance if funded.
-    if (newTx.type === 'send_mpesa') {
-      updatedWallet.mpesaBalanceKes = Math.max(0, updatedWallet.mpesaBalanceKes - (newTx.fromAmount + newTx.fee));
+    if (newTx.type === 'deposit_mpesa') {
+      const depositAmt = newTx.toAmount || newTx.fromAmount;
+      updatedWallet.mpesaBalanceKes = (updatedWallet.mpesaBalanceKes || 0) + depositAmt;
+    } else if (newTx.type === 'send_mpesa') {
+      if (newTx.fromCurrency === 'KES') {
+        updatedWallet.mpesaBalanceKes = Math.max(0, updatedWallet.mpesaBalanceKes - (newTx.fromAmount + newTx.fee));
+      }
     } else if (newTx.type === 'send_telebirr') {
       updatedWallet.telebirrBalanceEtb = Math.max(0, updatedWallet.telebirrBalanceEtb - (newTx.fromAmount + newTx.fee));
     } else if (newTx.type === 'sell_btc') {

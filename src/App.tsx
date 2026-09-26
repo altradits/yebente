@@ -222,6 +222,7 @@ export default function App() {
         isOpen={activeModal === 'send_mpesa'}
         onClose={() => setActiveModal('none')}
         wallet={wallet}
+        rates={rates}
         onSuccess={handleTransactionSuccess}
       />
 
