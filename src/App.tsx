@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from './types';
-import { fetchLiveRates } from './services/ratesService';
+import { fetchLiveRates, getCachedRates } from './services/ratesService';
 import {
   getStoredWallet,
   saveStoredWallet,
   getStoredTransactions,
+  clearStoredTransactions,
   addTransaction,
   ejectWallet,
   wipeWallet,
@@ -23,20 +24,24 @@ import { ArrowDownLeft, ArrowUpRight, Send, ArrowRight } from 'lucide-react';
 
 export default function App() {
   const [wallet, setWallet] = useState<UserWallet>(getStoredWallet);
-  const [showBalanceSection, setShowBalanceSection] = useState(false);
+  const [showBalanceSection, setShowBalanceSection] = useState(wallet.isConnected);
   const [transactions, setTransactions] = useState<Transaction[]>(getStoredTransactions);
-  const [rates, setRates] = useState<ExchangeRates>({
-    btcUsd: 88450,
-    btcKes: 11410050,
-    btcEtb: 11321600,
-    usdKes: 129.0,
-    usdEtb: 128.0,
-    change24hUsd: 2.45,
-    change24hKes: 2.38,
-    change24hEtb: 2.52,
-    lastUpdated: Date.now(),
-    isLive: true,
-  });
+  const [rates, setRates] = useState<ExchangeRates>(
+    () =>
+      getCachedRates() || {
+        btcUsd: 0,
+        btcKes: 0,
+        btcEtb: 0,
+        usdKes: 0,
+        usdEtb: 0,
+        change24hUsd: 0,
+        change24hKes: 0,
+        change24hEtb: 0,
+        lastUpdated: 0,
+        isLive: false,
+      }
+  );
+  const [ratesError, setRatesError] = useState<string | null>(null);
 
   const [isRefreshingRates, setIsRefreshingRates] = useState(false);
   const [isFrameMode, setIsFrameMode] = useState(true);
@@ -53,8 +58,9 @@ export default function App() {
     try {
       const data = await fetchLiveRates();
       setRates(data);
-    } catch {
-      // ignore
+      setRatesError(null);
+    } catch (err: unknown) {
+      setRatesError(err instanceof Error ? err.message : 'Unable to reach rates provider.');
     } finally {
       setIsRefreshingRates(false);
     }
@@ -69,7 +75,7 @@ export default function App() {
   const handleUpdateWallet = (updated: UserWallet) => {
     setWallet(updated);
     saveStoredWallet(updated);
-    setShowBalanceSection(false);
+    setShowBalanceSection(true);
   };
 
   const handleEjectWallet = () => {
@@ -96,6 +102,12 @@ export default function App() {
     const { updatedWallet, updatedTransactions } = addTransaction(txData, wallet);
     setWallet(updatedWallet);
     setTransactions(updatedTransactions);
+    setShowBalanceSection(true);
+  };
+
+  const handleClearHistory = () => {
+    const cleared = clearStoredTransactions();
+    setTransactions(cleared);
   };
 
   return (
@@ -121,12 +133,20 @@ export default function App() {
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-24">
+          {ratesError && rates.btcUsd === 0 && (
+            <div className="p-3 rounded-2xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs">
+              <p className="font-semibold">Exchange Rates Offline</p>
+              <p className="text-[11px] text-red-400/90 mt-0.5">{ratesError}</p>
+            </div>
+          )}
+
           {/* 1. Main Balance Portfolio Card (only rendered when connected AND navbar button clicked) */}
           {wallet.isConnected && showBalanceSection && (
             <BalanceCard
               wallet={wallet}
               rates={rates}
               onOpenWalletSettings={() => setActiveModal('wallet_settings')}
+              onUpdateWallet={handleUpdateWallet}
               onEjectWallet={handleEjectWallet}
               onClose={() => setShowBalanceSection(false)}
             />
@@ -144,6 +164,7 @@ export default function App() {
           <TransactionHistory
             transactions={transactions}
             onSelectTransaction={(tx) => setSelectedTx(tx)}
+            onClearHistory={handleClearHistory}
           />
         </main>
 
@@ -221,6 +242,7 @@ export default function App() {
         isOpen={activeModal === 'send_mpesa'}
         onClose={() => setActiveModal('none')}
         wallet={wallet}
+        rates={rates}
         onSuccess={handleTransactionSuccess}
       />
 

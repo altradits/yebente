@@ -2,7 +2,7 @@ export type WalletType = 'custodial' | 'non-custodial';
 
 export type Currency = 'SATS' | 'BTC' | 'KES' | 'ETB' | 'USD';
 
-export type TransactionType = 'buy_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr';
+export type TransactionType = 'buy_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr' | 'deposit_mpesa';
 
 export type TransactionStatus = 'completed' | 'pending' | 'failed';
 

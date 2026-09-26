@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserWallet, Transaction } from '../types';
-import { X, ArrowRight, Smartphone, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, ArrowRight, Smartphone, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 
 interface SendTelebirrModalProps {
   isOpen: boolean;
@@ -18,7 +18,8 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
   const [phone, setPhone] = useState<string>('');
   const [amountStr, setAmountStr] = useState<string>('');
   const [note, setNote] = useState<string>('');
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
   if (!isOpen) return null;
 
@@ -29,31 +30,13 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
 
   const handleConfirm = () => {
     if (numericAmount <= 0) return;
-    setStep('processing');
-
-    setTimeout(() => {
-      const refCode = `ETHIO-TB-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-
-      onSuccess({
-        type: 'send_telebirr',
-        title: 'Sent Telebirr Transfer',
-        status: 'completed',
-        fromCurrency: 'ETB',
-        fromAmount: numericAmount,
-        fee,
-        feeCurrency: 'ETB',
-        recipient: `+${phone}`,
-        referenceNumber: refCode,
-        walletType: wallet.type,
-        note: note || 'Telebirr Mobile Remittance',
-      });
-
-      setStep('success');
-    }, 1800);
+    setErrorMessage('Telebirr payment rail is not yet active. The developer must integrate Ethio Telecom Telebirr credentials (Issue #5) before live transfers can be dispatched.');
+    setStep('error');
   };
 
   const handleResetAndClose = () => {
     setStep('input');
+    setErrorMessage('');
     onClose();
   };
 
@@ -87,16 +70,34 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
                 <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
                   Recipient Telebirr Phone
                 </label>
-                <div className="relative">
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    onWheel={(e) => e.currentTarget.blur()}
-                    placeholder="2519XXXXXXXX or 2517XXXXXXXX"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                  <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
+                <div className="flex items-center rounded-2xl bg-[#140E1B] border border-[#382B44] focus-within:border-[#946069] overflow-hidden">
+                  <div className="flex items-center px-3 py-2.5 bg-[#1E1627] border-r border-[#382B44] shrink-0 select-none">
+                    <span className="text-xs font-mono font-bold text-[#F8F0E7]">+251</span>
+                  </div>
+                  <div className="relative flex-1">
+                    <input
+                      type="tel"
+                      value={phone.startsWith('251') ? phone.slice(3) : phone.startsWith('0') ? phone.slice(1) : phone}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        const clean = raw.startsWith('251') ? raw.slice(3) : raw.startsWith('0') ? raw.slice(1) : raw;
+                        setPhone(clean.length > 0 ? `251${clean.slice(0, 9)}` : '');
+                      }}
+                      placeholder="9XX XXX XXX"
+                      maxLength={12}
+                      className="w-full bg-transparent px-3.5 py-2.5 text-sm font-mono font-bold text-[#F8F0E7] placeholder-[#554653] focus:outline-none"
+                    />
+                    {phone && (
+                      <button
+                        type="button"
+                        onClick={() => setPhone('')}
+                        title="Clear phone number"
+                        className="absolute right-3 top-3 w-5 h-5 rounded-full bg-[#2A1E37] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -104,8 +105,8 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
               <div>
                 <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
                   <span className="font-semibold">Amount to Transfer</span>
-                  <span className="font-mono text-[#9B97A2]">
-                    Avail: {wallet.telebirrBalanceEtb.toLocaleString()} ETB
+                  <span className="font-mono text-[#9B97A2] text-[11px]">
+                    Rail: Ethio Telecom Telebirr
                   </span>
                 </div>
                 <div className="relative">
@@ -153,14 +154,31 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericAmount <= 0 || totalDeduction > wallet.telebirrBalanceEtb}
+                disabled={numericAmount <= 0}
                 className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
               >
-                {totalDeduction > wallet.telebirrBalanceEtb
-                  ? 'Insufficient Telebirr Balance'
-                  : `Send ${numericAmount.toLocaleString()} ETB`}
+                Send {numericAmount > 0 ? `${numericAmount.toLocaleString()} ETB` : 'ETB'}
               </button>
             </>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-red-950/30 border border-red-500/40 flex items-center justify-center text-red-400">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Telebirr Rail Inactive</h3>
+                <p className="text-xs text-red-300 mt-1 max-w-xs">{errorMessage}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Go Back
+              </button>
+            </div>
           )}
 
           {step === 'processing' && (

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check } from 'lucide-react';
+import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { KenyaPhoneInput } from './KenyaPhoneInput';
+import { formatKenyanDisplayPhone, isValidKenyanPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
 
 interface SellBtcModalProps {
   isOpen: boolean;
@@ -21,10 +23,12 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const [satsAmountStr, setSatsAmountStr] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [recipientName, setRecipientName] = useState<string>('');
+  const [verifiedInfo, setVerifiedInfo] = useState<VerifyRecipientResponse | null>(null);
   const [sourceMode, setSourceMode] = useState<'custodial' | 'external'>(
     wallet.type === 'non-custodial' ? 'external' : 'custodial'
   );
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const [copiedEscrow, setCopiedEscrow] = useState(false);
 
   if (!isOpen) return null;
@@ -41,6 +45,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const handleDestinationChange = (newDest: 'mpesa' | 'telebirr') => {
     setDestination(newDest);
     setPhone('');
+    setErrorMessage('');
   };
 
   const handleCopyEscrow = () => {
@@ -49,15 +54,40 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
     setTimeout(() => setCopiedEscrow(false), 2000);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (numericSats <= 0) return;
     setStep('processing');
+    setErrorMessage('');
 
-    setTimeout(() => {
-      const refCode =
-        destination === 'mpesa'
-          ? `SAF-MP-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
-          : `ETHIO-TB-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    try {
+      let refCode = '';
+      if (destination === 'mpesa') {
+        const res = await sendMpesaPayout({
+          phone,
+          amount: Math.round(fiatPayout),
+          currency: 'KES',
+          satsAmount: numericSats,
+          recipientName: recipientName || verifiedInfo?.name,
+          note: 'Sats Cashout to M-Pesa',
+        });
+
+        if (!res.success) {
+          setErrorMessage(res.error || 'Failed to dispatch M-Pesa payout.');
+          setStep('error');
+          return;
+        }
+
+        if (!res.referenceNumber) {
+          setErrorMessage('M-Pesa payout was submitted but no transaction reference was returned by Safaricom.');
+          setStep('error');
+          return;
+        }
+        refCode = res.referenceNumber;
+      } else {
+        setErrorMessage('Telebirr payout integration is not yet active. The developer must configure Telebirr API credentials (Issue #5).');
+        setStep('error');
+        return;
+      }
 
       onSuccess({
         type: 'sell_btc',
@@ -70,18 +100,22 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
         rateUsed: currentRate,
         fee: satsFee,
         feeCurrency: 'SATS',
-        recipient: `+${phone} (${recipientName})`,
+        recipient: `+${phone} (${recipientName || verifiedInfo?.name || 'Recipient'})`,
         referenceNumber: refCode,
         walletType: sourceMode === 'custodial' ? 'custodial' : 'non-custodial',
         note: `Direct payout to ${destination === 'mpesa' ? 'M-Pesa' : 'Telebirr'} mobile account`,
       });
 
       setStep('success');
-    }, 2200);
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Error processing payout.');
+      setStep('error');
+    }
   };
 
   const handleResetAndClose = () => {
     setStep('input');
+    setErrorMessage('');
     onClose();
   };
 
@@ -243,46 +277,87 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
 
               {/* Recipient Phone & Name */}
               <div className="space-y-2.5">
-                <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    {destination === 'mpesa' ? 'M-Pesa Recipient Phone' : 'Telebirr Recipient Phone'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      onWheel={(e) => e.currentTarget.blur()}
-                      placeholder={destination === 'mpesa' ? '2547XXXXXXXX' : '2519XXXXXXXX'}
-                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                    />
-                    <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
-                  </div>
-                </div>
+                {destination === 'mpesa' ? (
+                  <>
+                    <div className="space-y-1">
+                      <KenyaPhoneInput
+                        value={phone}
+                        onChange={(full) => {
+                          setPhone(full);
+                          if (verifiedInfo) setVerifiedInfo(null);
+                        }}
+                        onVerifiedChange={(info) => {
+                          setVerifiedInfo(info);
+                          if (info?.name) setRecipientName(info.name);
+                        }}
+                        label="M-Pesa Recipient Phone"
+                        autoVerify={false}
+                      />
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    Registered Account Name
-                  </label>
-                  <input
-                    type="text"
-                    value={recipientName}
-                    onChange={(e) => setRecipientName(e.target.value)}
-                    placeholder="Recipient Full Name"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                </div>
+                    {(!verifiedInfo || !verifiedInfo.verified) && isValidKenyanPhone(phone) && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-amber-300 text-[11px]">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                        <span>Hakikisha unverified in sandbox: Payout will dispatch to +{phone}.</span>
+                      </div>
+                    )}
+                    {(!verifiedInfo || !verifiedInfo.verified) && !isValidKenyanPhone(phone) && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] text-[11px]">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-[#9B97A2]" />
+                        <span>Enter a valid 9-digit Kenyan phone number (e.g. 712 345 678).</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
+                        Telebirr Recipient Phone
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="tel"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="2519XXXXXXXX"
+                          className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                        />
+                        <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
+                        Registered Account Name
+                      </label>
+                      <input
+                        type="text"
+                        value={recipientName}
+                        onChange={(e) => setRecipientName(e.target.value)}
+                        placeholder="Recipient Full Name"
+                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Submit CTA */}
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericSats <= 0 || (sourceMode === 'custodial' && numericSats > availableSats)}
+                disabled={
+                  numericSats <= 0 ||
+                  (sourceMode === 'custodial' && numericSats > availableSats) ||
+                  (destination === 'mpesa' && !isValidKenyanPhone(phone)) ||
+                  (destination === 'telebirr' && (!phone.trim() || !recipientName.trim()))
+                }
                 className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
               >
                 {sourceMode === 'custodial' && numericSats > availableSats
                   ? 'Insufficient Sats Balance'
+                  : destination === 'mpesa' && !isValidKenyanPhone(phone)
+                  ? 'Enter Valid M-Pesa Phone Number'
                   : `Confirm Sell for ${Math.round(fiatPayout).toLocaleString()} ${currencyCode}`}
               </button>
             </>
@@ -296,6 +371,25 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-[#F8F0E7]">Broadcasting Liquidation</h3>
               </div>
+            </div>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-red-950/30 border border-red-500/40 flex items-center justify-center text-red-400">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Payout Failed</h3>
+                <p className="text-xs text-red-300 mt-1 max-w-xs">{errorMessage}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Try Again
+              </button>
             </div>
           )}
 
