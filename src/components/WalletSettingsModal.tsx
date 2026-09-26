@@ -59,7 +59,13 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
       const res = await fetchBitcoinAddressBalance(cleanAddr);
       setOnChainResult(res);
       if (res.success) {
-        setSatsStr(String(res.sats));
+        if (!res.isLightning) {
+          setSatsStr(String(res.sats));
+        } else if (res.lightningAddress) {
+          if (cleanAddr.toLowerCase().replace(/^lightning:/i, '').startsWith('lnurl1')) {
+            setAddress(res.lightningAddress);
+          }
+        }
       }
     } finally {
       setIsVerifying(false);
@@ -68,7 +74,12 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
 
   // Insert or update wallet
   const handleInsertOrUpdate = () => {
-    const finalAddress = address.trim();
+    const rawAddress = address.trim();
+    const finalAddress =
+      onChainResult?.lightningAddress &&
+      rawAddress.toLowerCase().replace(/^lightning:/i, '').startsWith('lnurl1')
+        ? onChainResult.lightningAddress
+        : rawAddress;
     let finalSats = 0;
 
     if (selectedType === 'non-custodial') {
@@ -236,7 +247,8 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
 
                   {onChainResult && onChainResult.success && onChainResult.isLightning && (
                     <span className="text-[11px] font-mono text-[#D1B9B3]">
-                      Verified: {onChainResult.lightningProvider} (Active)
+                      Verified: {onChainResult.lightningProvider}
+                      {onChainResult.lightningAddress ? ` (${onChainResult.lightningAddress})` : ''} (Active)
                     </span>
                   )}
                   {onChainResult && onChainResult.success && !onChainResult.isLightning && (

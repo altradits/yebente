@@ -9,6 +9,7 @@ export interface AddressBalanceResult {
   success: boolean;
   isLightning?: boolean;
   lightningProvider?: string;
+  lightningAddress?: string;
   minSendableSats?: number;
   maxSendableSats?: number;
   callbackUrl?: string;
@@ -82,6 +83,7 @@ export async function fetchBitcoinAddressBalance(
       success: true,
       isLightning: true,
       lightningProvider: lnDetails.provider,
+      lightningAddress: lnDetails.address,
       minSendableSats: lnDetails.minSendableSats,
       maxSendableSats: lnDetails.maxSendableSats,
       callbackUrl: lnDetails.callbackUrl,

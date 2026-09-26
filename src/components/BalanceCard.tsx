@@ -78,7 +78,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             ) : (
               <>
                 <KeyRound className="w-3 h-3 text-[#763698]" />
-                <span>Self-Custody</span>
+                <span>{wallet.nonCustodialLabel || 'Self-Custody'}</span>
               </>
             )}
           </button>

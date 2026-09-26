@@ -18,10 +18,54 @@ export interface WebLNBalanceResult {
 }
 
 /**
- * Checks if input is a valid Lightning Address (RFC format: user@domain.com)
+ * Decodes a bech32-encoded string (such as lnurl1...) to an actual HTTP/HTTPS URL
+ */
+export function decodeLnurl(lnurlStr: string): string | null {
+  const clean = lnurlStr.trim().toLowerCase().replace(/^lightning:/i, '');
+  if (!clean.startsWith('lnurl1')) {
+    return null;
+  }
+
+  const ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+  const sep = clean.lastIndexOf('1');
+  if (sep === -1) return null;
+
+  const dataPart = clean.substring(sep + 1);
+  const words: number[] = [];
+  // Skip the 6-character checksum at the end
+  for (let i = 0; i < dataPart.length - 6; i++) {
+    const idx = ALPHABET.indexOf(dataPart[i]);
+    if (idx === -1) return null;
+    words.push(idx);
+  }
+
+  let acc = 0;
+  let bits = 0;
+  const bytes: number[] = [];
+  for (const v of words) {
+    acc = (acc << 5) | v;
+    bits += 5;
+    while (bits >= 8) {
+      bits -= 8;
+      bytes.push((acc >> bits) & 0xff);
+    }
+  }
+
+  try {
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks if input is a valid Lightning Address (user@domain.com) or encoded LNURL (lnurl1...)
  */
 export function isLightningAddress(input: string): boolean {
-  const clean = input.trim();
+  const clean = input.trim().toLowerCase().replace(/^lightning:/i, '');
+  if (clean.startsWith('lnurl1')) {
+    return true;
+  }
   const lightningRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
   return lightningRegex.test(clean);
 }
@@ -33,29 +77,64 @@ export function isLightningAddress(input: string): boolean {
 export async function resolveLightningAddress(
   address: string
 ): Promise<LightningAddressDetails> {
-  const clean = address.trim().toLowerCase();
-  const [username, domain] = clean.split('@');
+  const clean = address.trim().toLowerCase().replace(/^lightning:/i, '');
 
-  if (!username || !domain) {
-    return {
-      success: false,
-      address: clean,
-      username: '',
-      domain: '',
-      provider: 'Unknown',
-      minSendableSats: 0,
-      maxSendableSats: 0,
-      callbackUrl: '',
-      commentAllowed: 0,
-      error: 'Invalid Lightning Address format.',
-    };
+  let targetUrl: string;
+  let defaultUsername = '';
+  let defaultDomain = '';
+
+  if (clean.startsWith('lnurl1')) {
+    const decoded = decodeLnurl(clean);
+    if (!decoded) {
+      return {
+        success: false,
+        address: clean,
+        username: '',
+        domain: '',
+        provider: 'Unknown',
+        minSendableSats: 0,
+        maxSendableSats: 0,
+        callbackUrl: '',
+        commentAllowed: 0,
+        error: 'Invalid bech32 LNURL encoding.',
+      };
+    }
+    targetUrl = decoded;
+    try {
+      const parsed = new URL(decoded);
+      defaultDomain = parsed.hostname;
+      const pathParts = parsed.pathname.split('/').filter(Boolean);
+      defaultUsername = pathParts[pathParts.length - 1] || 'user';
+    } catch {
+      defaultDomain = 'lightning';
+      defaultUsername = 'user';
+    }
+  } else {
+    const [username, domain] = clean.split('@');
+    if (!username || !domain) {
+      return {
+        success: false,
+        address: clean,
+        username: '',
+        domain: '',
+        provider: 'Unknown',
+        minSendableSats: 0,
+        maxSendableSats: 0,
+        callbackUrl: '',
+        commentAllowed: 0,
+        error: 'Invalid Lightning Address format.',
+      };
+    }
+    defaultUsername = username;
+    defaultDomain = domain;
+    targetUrl = `https://${domain}/.well-known/lnurlp/${username}`;
   }
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
 
-    const res = await fetch(`https://${domain}/.well-known/lnurlp/${username}`, {
+    const res = await fetch(targetUrl, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -64,14 +143,14 @@ export async function resolveLightningAddress(
       return {
         success: false,
         address: clean,
-        username,
-        domain,
-        provider: domain,
+        username: defaultUsername,
+        domain: defaultDomain,
+        provider: defaultDomain,
         minSendableSats: 0,
         maxSendableSats: 0,
         callbackUrl: '',
         commentAllowed: 0,
-        error: `Could not reach Lightning wallet at ${domain}. Verify the username.`,
+        error: `Could not reach Lightning wallet at ${defaultDomain}.`,
       };
     }
 
@@ -81,9 +160,9 @@ export async function resolveLightningAddress(
       return {
         success: false,
         address: clean,
-        username,
-        domain,
-        provider: domain,
+        username: defaultUsername,
+        domain: defaultDomain,
+        provider: defaultDomain,
         minSendableSats: 0,
         maxSendableSats: 0,
         callbackUrl: '',
@@ -93,17 +172,40 @@ export async function resolveLightningAddress(
     }
 
     // Extract provider name from domain or metadata
-    let provider = domain;
-    if (domain.includes('walletofsatoshi')) {
+    let provider = defaultDomain;
+    if (defaultDomain.includes('walletofsatoshi')) {
       provider = 'Wallet of Satoshi';
-    } else if (domain.includes('blink.sv')) {
+    } else if (defaultDomain.includes('blink.sv')) {
       provider = 'Blink (Galoy)';
-    } else if (domain.includes('getalby')) {
+    } else if (defaultDomain.includes('getalby')) {
       provider = 'Alby';
-    } else if (domain.includes('strike.me')) {
+    } else if (defaultDomain.includes('strike.me')) {
       provider = 'Strike';
-    } else if (domain.includes('coinos.io')) {
+    } else if (defaultDomain.includes('coinos.io')) {
       provider = 'CoinOS';
+    }
+
+    // Extract human-readable address from metadata if present (LUD-06 / LUD-16 spec)
+    let standardAddress = `${defaultUsername}@${defaultDomain}`;
+    let parsedMetadata = data.metadata;
+    if (typeof parsedMetadata === 'string') {
+      try {
+        parsedMetadata = JSON.parse(parsedMetadata);
+      } catch {
+        parsedMetadata = [];
+      }
+    }
+    if (Array.isArray(parsedMetadata)) {
+      try {
+        const idEntry = parsedMetadata.find(
+          (m: unknown) => Array.isArray(m) && m[0] === 'text/identifier'
+        );
+        if (idEntry && typeof idEntry[1] === 'string') {
+          standardAddress = idEntry[1];
+        }
+      } catch {
+        // ignore
+      }
     }
 
     const minSendableSats = Math.ceil((Number(data.minSendable) || 1000) / 1000);
@@ -111,9 +213,9 @@ export async function resolveLightningAddress(
 
     return {
       success: true,
-      address: clean,
-      username,
-      domain,
+      address: standardAddress,
+      username: defaultUsername,
+      domain: defaultDomain,
       provider,
       minSendableSats,
       maxSendableSats,
@@ -125,14 +227,14 @@ export async function resolveLightningAddress(
     return {
       success: false,
       address: clean,
-      username,
-      domain,
-      provider: domain,
+      username: defaultUsername,
+      domain: defaultDomain,
+      provider: defaultDomain,
       minSendableSats: 0,
       maxSendableSats: 0,
       callbackUrl: '',
       commentAllowed: 0,
-      error: `Network error connecting to ${domain}: ${message}`,
+      error: `Network error connecting to ${defaultDomain}: ${message}`,
     };
   }
 }
