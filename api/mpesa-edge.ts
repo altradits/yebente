@@ -240,51 +240,54 @@ export async function handleMpesaRequest(
           ? 'https://api.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha'
           : 'https://sandbox.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha';
 
-      const initiator = getEnv('MPESA_INITIATOR_NAME', customEnv);
-      const security = getEnv('MPESA_SECURITY_CREDENTIAL', customEnv);
-
-      if (!initiator || !security) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            verified: false,
-            error: 'Safaricom B2C Hakikisha requires MPESA_INITIATOR_NAME and MPESA_SECURITY_CREDENTIAL environment variables.',
-          }),
-          { status: 500, headers: corsHeaders }
-        );
-      }
-
       const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const b2cShortcode = getEnv('MPESA_B2C_SHORTCODE', customEnv) || shortcode || '600000';
+
+      const payload = {
+        header: {
+          requestID: `REQ${Date.now()}`,
+          timestamp: new Date().toISOString(),
+        },
+        body: {
+          msisdn: formatted,
+          shortcode: String(b2cShortcode),
+        },
+      };
+
       const res = await fetch(b2cUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          InitiatorName: initiator,
-          SecurityCredential: security,
-          CommandID: 'BusinessPayment',
-          PartyA: shortcode,
-          PartyB: formatted,
-          Remarks: 'Hakikisha Lookup',
-        }),
+        body: JSON.stringify(payload),
       });
 
       const d = await res.json();
-      if (!res.ok) {
+      if (!res.ok || (d.header && d.header.status !== '200')) {
+        const errMsg =
+          d?.body?.message ||
+          d?.header?.message ||
+          d.errorMessage ||
+          d.ResponseDescription ||
+          'Safaricom B2C Hakikisha lookup failed.';
         return new Response(
           JSON.stringify({
             success: false,
             verified: false,
-            error: d.errorMessage || d.ResponseDescription || 'Safaricom B2C Hakikisha lookup failed.',
+            error: errMsg,
             details: d,
           }),
           { status: 400, headers: corsHeaders }
         );
       }
 
-      const resolvedName = d.CustomerName || d.ReceiverName || d.name;
+      const bodyObj = d?.body || {};
+      const nameParts = [bodyObj.firstName, bodyObj.middleName, bodyObj.lastName].filter(Boolean);
+      const resolvedName = nameParts.length > 0
+        ? nameParts.join(' ').trim()
+        : (bodyObj.CustomerName || bodyObj.ReceiverName || d.CustomerName || d.name);
+
       if (!resolvedName) {
         return new Response(
           JSON.stringify({
@@ -305,6 +308,7 @@ export async function handleMpesaRequest(
           name: resolvedName,
           provider: 'Safaricom M-Pesa Hakikisha',
           upstreamVerified: true,
+          details: d,
         }),
         { headers: corsHeaders }
       );
@@ -381,7 +385,369 @@ export async function handleMpesaRequest(
       );
     }
 
-    // 6. Callback Webhook Receiver
+    // 6. Hakikisha B2B (Organization Lookup via sfcverify)
+    if (pathname === '/hakikisha/b2b' && request.method === 'POST') {
+      const body = await request.json();
+      const code = String(body.shortCode || '').trim();
+
+      if (!code) {
+        return new Response(
+          JSON.stringify({ success: false, verified: false, error: 'shortCode is required.' }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/sfcverify/v1/query/info`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          IdentifierType: String(body.identifierType || '4'),
+          Identifier: code,
+        }),
+      });
+
+      const d = await res.json();
+      return new Response(
+        JSON.stringify({
+          success: res.ok,
+          verified: res.ok,
+          shortCode: code,
+          details: d,
+        }),
+        { status: res.ok ? 200 : 400, headers: corsHeaders }
+      );
+    }
+
+    // 7. Account Balance Query
+    if (pathname === '/balance' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({}));
+      const initiator = body.initiator || getEnv('MPESA_INITIATOR_NAME', customEnv) || 'testapi';
+      const security = body.securityCredential || getEnv('MPESA_SECURITY_CREDENTIAL', customEnv) || 'test';
+      const balShortcode = body.shortcode || getEnv('MPESA_B2C_SHORTCODE', customEnv) || shortcode || '600000';
+
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/mpesa/accountbalance/v1/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Initiator: initiator,
+          SecurityCredential: security,
+          CommandID: 'AccountBalance',
+          PartyA: String(balShortcode),
+          IdentifierType: '4',
+          Remarks: body.remarks || 'Account Balance Query',
+          QueueTimeOutURL: body.callbackUrl || callbackUrl,
+          ResultURL: body.callbackUrl || callbackUrl,
+        }),
+      });
+
+      const d = await res.json();
+      return new Response(
+        JSON.stringify({
+          success: res.ok && d.ResponseCode === '0',
+          originatorConversationId: d.OriginatorConversationID,
+          conversationId: d.ConversationID,
+          responseCode: d.ResponseCode,
+          responseDescription: d.ResponseDescription,
+          details: d,
+        }),
+        { status: res.ok ? 200 : 400, headers: corsHeaders }
+      );
+    }
+
+    // 8. General Transaction Status Query
+    if (pathname === '/transaction-status' && request.method === 'POST') {
+      const body = await request.json();
+      if (!body.transactionId) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'transactionId is required.' }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const initiator = body.initiator || getEnv('MPESA_INITIATOR_NAME', customEnv) || 'testapi';
+      const security = body.securityCredential || getEnv('MPESA_SECURITY_CREDENTIAL', customEnv) || 'test';
+
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/mpesa/transactionstatus/v1/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Initiator: initiator,
+          SecurityCredential: security,
+          CommandID: 'TransactionStatusQuery',
+          TransactionID: String(body.transactionId).trim(),
+          PartyA: String(body.shortcode || shortcode || '600000'),
+          IdentifierType: body.identifierType || '4',
+          ResultURL: body.callbackUrl || callbackUrl,
+          QueueTimeOutURL: body.callbackUrl || callbackUrl,
+          Remarks: body.remarks || 'Transaction Status Query',
+          Occasion: body.occasion || 'Query',
+        }),
+      });
+
+      const d = await res.json();
+      return new Response(
+        JSON.stringify({
+          success: res.ok && d.ResponseCode === '0',
+          originatorConversationId: d.OriginatorConversationID,
+          conversationId: d.ConversationID,
+          responseCode: d.ResponseCode,
+          responseDescription: d.ResponseDescription,
+          details: d,
+        }),
+        { status: res.ok ? 200 : 400, headers: corsHeaders }
+      );
+    }
+
+    // 9. Transaction Reversal
+    if (pathname === '/reversal' && request.method === 'POST') {
+      const body = await request.json();
+      if (!body.transactionId || !body.amount) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'transactionId and amount are required.' }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const initiator = body.initiator || getEnv('MPESA_INITIATOR_NAME', customEnv) || 'testapi';
+      const security = body.securityCredential || getEnv('MPESA_SECURITY_CREDENTIAL', customEnv) || 'test';
+
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/mpesa/reversal/v1/request`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Initiator: initiator,
+          SecurityCredential: security,
+          CommandID: 'TransactionReversal',
+          TransactionID: String(body.transactionId).trim(),
+          Amount: String(Math.round(Number(body.amount))),
+          ReceiverParty: String(body.receiverParty || shortcode || '600000'),
+          RecieverIdentifierType: body.receiverIdentifierType || '11',
+          ResultURL: body.callbackUrl || callbackUrl,
+          QueueTimeOutURL: body.callbackUrl || callbackUrl,
+          Remarks: body.remarks || 'Transaction Reversal',
+          Occasion: body.occasion || 'Reversal',
+        }),
+      });
+
+      const d = await res.json();
+      return new Response(
+        JSON.stringify({
+          success: res.ok && d.ResponseCode === '0',
+          originatorConversationId: d.OriginatorConversationID,
+          conversationId: d.ConversationID,
+          responseCode: d.ResponseCode,
+          responseDescription: d.ResponseDescription,
+          details: d,
+        }),
+        { status: res.ok ? 200 : 400, headers: corsHeaders }
+      );
+    }
+
+    // 10. B2B Payment
+    if (pathname === '/b2b' && request.method === 'POST') {
+      const body = await request.json();
+      if (!body.partyB || !body.amount) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'partyB and amount are required.' }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const initiator = body.initiator || getEnv('MPESA_INITIATOR_NAME', customEnv) || 'testapi';
+      const security = body.securityCredential || getEnv('MPESA_SECURITY_CREDENTIAL', customEnv) || 'test';
+      const partyA = body.partyA || getEnv('MPESA_B2C_SHORTCODE', customEnv) || shortcode || '600000';
+
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/mpesa/b2b/v1/paymentrequest`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Initiator: initiator,
+          SecurityCredential: security,
+          CommandID: body.commandId || 'BusinessPayBill',
+          SenderIdentifierType: body.senderIdentifierType || '4',
+          RecieverIdentifierType: body.receiverIdentifierType || '4',
+          Amount: String(Math.round(Number(body.amount))),
+          PartyA: String(partyA),
+          PartyB: String(body.partyB),
+          AccountReference: body.accountReference || 'INV001',
+          Remarks: body.remarks || 'B2B Settlement',
+          QueueTimeOutURL: body.callbackUrl || callbackUrl,
+          ResultURL: body.callbackUrl || callbackUrl,
+        }),
+      });
+
+      const d = await res.json();
+      return new Response(
+        JSON.stringify({
+          success: res.ok && d.ResponseCode === '0',
+          originatorConversationId: d.OriginatorConversationID,
+          conversationId: d.ConversationID,
+          responseCode: d.ResponseCode,
+          responseDescription: d.ResponseDescription,
+          details: d,
+        }),
+        { status: res.ok ? 200 : 400, headers: corsHeaders }
+      );
+    }
+
+    // 11. Ratiba Standing Order / Recurring Payments
+    if (pathname === '/ratiba' && request.method === 'POST') {
+      const body = await request.json();
+      const { amount, phone, startDate, endDate, transactionType } = body;
+      if (!amount || !phone || !startDate || !endDate) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'amount, phone, startDate (YYYYMMDD), and endDate (YYYYMMDD) are required for Ratiba standing order.',
+          }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const isBuyGoods = transactionType === 'Standing Order Customer Pay Merchant';
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/standingorder/v1/createStandingOrderExternal`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          StandingOrderName: body.standingOrderName || 'Scheduled Subscription',
+          BusinessShortCode: String(body.businessShortCode || shortcode || '174379'),
+          CustomStoId: body.customStoId || `STO${Date.now()}`,
+          TransactionType: transactionType || (isBuyGoods ? 'Standing Order Customer Pay Merchant' : 'Standing Order Customer Pay Bill'),
+          Amount: String(Math.round(Number(amount))),
+          PartyA: formatKenyanPhone(phone),
+          ReceiverPartyIdentifierType: isBuyGoods ? '2' : '4',
+          CallBackURL: body.callbackUrl || callbackUrl,
+          AccountReference: body.accountReference || 'RatibaPlan',
+          TransactionDesc: body.transactionDesc || 'Recurring Settlement',
+          Frequency: body.frequency || 'Monthly',
+          StartDate: String(startDate).replace(/[^0-9]/g, ''),
+          EndDate: String(endDate).replace(/[^0-9]/g, ''),
+        }),
+      });
+
+      const d = await res.json();
+      return new Response(JSON.stringify({ success: res.ok, details: d }), {
+        status: res.ok ? 200 : 400,
+        headers: corsHeaders,
+      });
+    }
+
+    // 12. C2B URL Register & Simulate
+    if (pathname === '/c2b/register' && request.method === 'POST') {
+      const body = await request.json();
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/mpesa/c2b/v1/registerurl`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ShortCode: String(body.shortCode || shortcode),
+          ResponseType: body.responseType || 'Completed',
+          ConfirmationURL: body.confirmationUrl || callbackUrl,
+          ValidationURL: body.validationUrl || callbackUrl,
+        }),
+      });
+      const d = await res.json();
+      return new Response(JSON.stringify({ success: res.ok, details: d }), {
+        status: res.ok ? 200 : 400,
+        headers: corsHeaders,
+      });
+    }
+
+    if (pathname === '/c2b/simulate' && request.method === 'POST') {
+      const body = await request.json();
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+      const res = await fetch(`${baseUrl}/mpesa/c2b/v1/simulate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ShortCode: String(body.shortCode || shortcode),
+          CommandID: body.commandId || 'CustomerPayBillOnline',
+          Amount: String(Math.round(Number(body.amount))),
+          Msisdn: formatKenyanPhone(body.msisdn),
+          BillRefNumber: body.billRefNumber || 'TestPayment',
+        }),
+      });
+      const d = await res.json();
+      return new Response(JSON.stringify({ success: res.ok, details: d }), {
+        status: res.ok ? 200 : 400,
+        headers: corsHeaders,
+      });
+    }
+
+    // 13. KYC & SIM Swap
+    if (pathname === '/kyc' && request.method === 'POST') {
+      const body = await request.json();
+      const formatted = formatKenyanPhone(body.phone);
+      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
+
+      if (body.action === 'sim-swap') {
+        const res = await fetch(`${baseUrl}/imsi/v2/checkATI`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ customerNumber: formatted }),
+        });
+        const d = await res.json();
+        return new Response(JSON.stringify({ success: res.ok, details: d }), {
+          status: res.ok ? 200 : 400,
+          headers: corsHeaders,
+        });
+      }
+
+      const res = await fetch(`${baseUrl}/v1/KYC-validation/validateID`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requestRefID: `REF${Date.now()}`,
+          shortCode: String(body.shortCode || shortcode || '174379'),
+          msisdn: formatted,
+          idType: body.idType || 'NationalID',
+          idNumber: String(body.idNumber || ''),
+        }),
+      });
+      const d = await res.json();
+      return new Response(JSON.stringify({ success: res.ok, details: d }), {
+        status: res.ok ? 200 : 400,
+        headers: corsHeaders,
+      });
+    }
+
+    // 14. Callback Webhook Receiver
     if (pathname === '/callback' && request.method === 'POST') {
       return new Response(
         JSON.stringify({ ResultCode: 0, ResultDesc: 'Accepted' }),

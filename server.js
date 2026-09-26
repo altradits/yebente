@@ -273,6 +273,11 @@ const C2B_HAKIKISHA_URL =
     ? 'https://api.safaricom.co.ke/c2b_hakikisha/v1/notify'
     : 'https://sandbox.safaricom.co.ke/c2b_hakikisha/v1/notify';
 
+const B2B_HAKIKISHA_URL =
+  DARAJA_ENV === 'production'
+    ? 'https://api.safaricom.co.ke/sfcverify/v1/query/info'
+    : 'https://sandbox.safaricom.co.ke/sfcverify/v1/query/info';
+
 /**
  * Safaricom B2C Hakikisha - Recipient Subscriber Name Verification
  * Queries Safaricom Daraja B2C Hakikisha endpoint. No fallback names.
@@ -293,24 +298,18 @@ app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
       });
     }
 
-    const initiator = process.env.MPESA_INITIATOR_NAME;
-    const security = process.env.MPESA_SECURITY_CREDENTIAL;
-    const shortcode = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
-
-    if (!initiator || !security) {
-      return res.status(500).json({
-        success: false,
-        verified: false,
-        error: 'Safaricom B2C Hakikisha failed: MPESA_INITIATOR_NAME and MPESA_SECURITY_CREDENTIAL must be configured in .env. Obtain credentials from your Safaricom Daraja account.',
-      });
-    }
-
+    const shortcode = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE || '600000';
     const accessToken = await getDarajaAccessToken();
+
     const payload = {
-      requestID: `REQ${Date.now()}`,
-      timestamp: getTimestamp(),
-      msisdn: formatted,
-      shortcode: shortcode,
+      header: {
+        requestID: `REQ${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+      body: {
+        msisdn: formatted,
+        shortcode: String(shortcode),
+      },
     };
 
     const response = await fetch(B2C_HAKIKISHA_URL, {
@@ -334,20 +333,26 @@ app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
       });
     }
 
-    if (!response.ok) {
+    if (!response.ok || (hakikishaData.header && hakikishaData.header.status !== '200')) {
+      const errMsg =
+        hakikishaData?.body?.message ||
+        hakikishaData?.header?.message ||
+        hakikishaData?.ResponseMessage ||
+        hakikishaData?.errorMessage ||
+        'Safaricom B2C Hakikisha lookup failed.';
       return res.status(400).json({
         success: false,
         verified: false,
-        error: hakikishaData.errorMessage || hakikishaData.ResponseDescription || hakikishaData.ResponseMessage || 'Safaricom B2C Hakikisha lookup failed.',
+        error: errMsg,
         details: hakikishaData,
       });
     }
 
-    const resolvedName =
-      hakikishaData?.CustomerName ||
-      hakikishaData?.ReceiverName ||
-      hakikishaData?.name ||
-      hakikishaData?.recipientName;
+    const b = hakikishaData?.body || {};
+    const nameParts = [b.firstName, b.middleName, b.lastName].filter(Boolean);
+    const resolvedName = nameParts.length > 0
+      ? nameParts.join(' ').trim()
+      : (b.CustomerName || b.ReceiverName || hakikishaData.CustomerName || hakikishaData.ReceiverName);
 
     if (!resolvedName) {
       return res.status(404).json({
@@ -456,6 +461,58 @@ app.post('/api/mpesa/hakikisha/c2b', async (req, res) => {
   }
 });
 
+/**
+ * Safaricom B2B Hakikisha - Organization Shortcode Verification (Query Org Info)
+ * Queries Safaricom Daraja /sfcverify/v1/query/info endpoint.
+ */
+app.post('/api/mpesa/hakikisha/b2b', async (req, res) => {
+  try {
+    const { shortCode, identifierType } = req.body;
+    if (!shortCode) {
+      return res.status(400).json({ success: false, verified: false, error: 'shortCode is required.' });
+    }
+
+    const cleanShortcode = String(shortCode).trim();
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      IdentifierType: String(identifierType || '4'),
+      Identifier: cleanShortcode,
+    };
+
+    const response = await fetch(B2B_HAKIKISHA_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        verified: false,
+        error: data.errorMessage || data.ResponseDescription || `Safaricom B2B Hakikisha lookup failed for ${cleanShortcode}.`,
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      verified: true,
+      shortCode: cleanShortcode,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      verified: false,
+      error: error.message || 'Internal server error during B2B Hakikisha verification.',
+    });
+  }
+});
+
 // Backwards-compatible alias for existing frontend callers
 app.post('/api/mpesa/verify-recipient', (req, res) => {
   req.url = '/api/mpesa/hakikisha/b2c';
@@ -550,6 +607,474 @@ app.post('/api/mpesa/payout', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error during M-Pesa payout.',
+    });
+  }
+});
+
+/**
+ * Safaricom Account Balance Query
+ * Queries available float and working balances on the organization shortcode
+ */
+app.post('/api/mpesa/balance', async (req, res) => {
+  try {
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const shortcode = req.body.shortcode || process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: 'AccountBalance',
+      PartyA: String(shortcode),
+      IdentifierType: '4',
+      Remarks: req.body.remarks || 'Account Balance Query',
+      QueueTimeOutURL: callbackUrl,
+      ResultURL: callbackUrl,
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/accountbalance/v1/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom Account Balance query failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Account Balance query.',
+    });
+  }
+});
+
+/**
+ * Safaricom General Transaction Status Query
+ * Queries the processing status of B2C, B2B, or C2B transactions
+ */
+app.post('/api/mpesa/transaction-status', async (req, res) => {
+  try {
+    const { transactionId, remarks, occasion } = req.body;
+    if (!transactionId) {
+      return res.status(400).json({ success: false, error: 'transactionId is required.' });
+    }
+
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const shortcode = req.body.shortcode || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: 'TransactionStatusQuery',
+      TransactionID: String(transactionId).trim(),
+      PartyA: String(shortcode),
+      IdentifierType: req.body.identifierType || '4',
+      ResultURL: callbackUrl,
+      QueueTimeOutURL: callbackUrl,
+      Remarks: remarks || 'Transaction Status Query',
+      Occasion: occasion || 'Query',
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/transactionstatus/v1/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom Transaction Status query failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Transaction Status query.',
+    });
+  }
+});
+
+/**
+ * Safaricom Transaction Reversal Request
+ * Initiates reversal of an accidental transaction
+ */
+app.post('/api/mpesa/reversal', async (req, res) => {
+  try {
+    const { transactionId, amount, remarks, occasion, receiverParty } = req.body;
+    if (!transactionId || !amount) {
+      return res.status(400).json({ success: false, error: 'transactionId and amount are required.' });
+    }
+
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const shortcode = receiverParty || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: 'TransactionReversal',
+      TransactionID: String(transactionId).trim(),
+      Amount: String(Math.round(Number(amount))),
+      ReceiverParty: String(shortcode),
+      RecieverIdentifierType: req.body.receiverIdentifierType || '11',
+      ResultURL: callbackUrl,
+      QueueTimeOutURL: callbackUrl,
+      Remarks: remarks || 'Transaction Reversal',
+      Occasion: occasion || 'Reversal',
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/reversal/v1/request`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom Transaction Reversal failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Transaction Reversal.',
+    });
+  }
+});
+
+/**
+ * Safaricom B2B Payment Request
+ * Transfers funds from business shortcode to merchant or paybill shortcode
+ */
+app.post('/api/mpesa/b2b', async (req, res) => {
+  try {
+    const { partyB, amount, accountReference, remarks, commandId } = req.body;
+    if (!partyB || !amount || Number(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'partyB and valid amount are required.' });
+    }
+
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const partyA = req.body.partyA || process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: commandId || 'BusinessPayBill',
+      SenderIdentifierType: req.body.senderIdentifierType || '4',
+      RecieverIdentifierType: req.body.receiverIdentifierType || '4',
+      Amount: String(Math.round(Number(amount))),
+      PartyA: String(partyA),
+      PartyB: String(partyB),
+      AccountReference: accountReference || 'INV001',
+      Remarks: remarks || 'B2B Settlement',
+      QueueTimeOutURL: callbackUrl,
+      ResultURL: callbackUrl,
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/b2b/v1/paymentrequest`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom B2B payment request failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during B2B payment.',
+    });
+  }
+});
+
+/**
+ * Safaricom M-Pesa Ratiba (Standing Order / Recurring Payments)
+ * Creates scheduled recurring reminder payments on Paybill or Till
+ */
+app.post('/api/mpesa/ratiba', async (req, res) => {
+  try {
+    const {
+      standingOrderName,
+      businessShortCode,
+      amount,
+      phone,
+      transactionType,
+      accountReference,
+      transactionDesc,
+      frequency,
+      startDate,
+      endDate,
+    } = req.body;
+
+    if (!amount || !phone || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'amount, phone, startDate (YYYYMMDD), and endDate (YYYYMMDD) are required for Ratiba standing order.',
+      });
+    }
+
+    const shortcode = businessShortCode || process.env.MPESA_SHORTCODE || '174379';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+    const isBuyGoods = transactionType === 'Standing Order Customer Pay Merchant';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      StandingOrderName: standingOrderName || 'Scheduled Subscription',
+      BusinessShortCode: String(shortcode),
+      CustomStoId: req.body.customStoId || `STO${Date.now()}`,
+      TransactionType: transactionType || (isBuyGoods ? 'Standing Order Customer Pay Merchant' : 'Standing Order Customer Pay Bill'),
+      Amount: String(Math.round(Number(amount))),
+      PartyA: formatKenyanPhone(phone),
+      ReceiverPartyIdentifierType: isBuyGoods ? '2' : '4',
+      CallBackURL: callbackUrl,
+      AccountReference: accountReference || 'RatibaPlan',
+      TransactionDesc: transactionDesc || 'Recurring Settlement',
+      Frequency: frequency || 'Monthly',
+      StartDate: String(startDate).replace(/[^0-9]/g, ''),
+      EndDate: String(endDate).replace(/[^0-9]/g, ''),
+    };
+
+    const response = await fetch(`${BASE_URL}/standingorder/v1/createStandingOrderExternal`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || (data.header && data.header.responseCode !== 200 && data.header.responseCode !== '200')) {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.header?.customerMessage || data.header?.responseMessage || data.errorMessage || 'Ratiba Standing Order creation failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Ratiba standing order creation.',
+    });
+  }
+});
+
+/**
+ * Safaricom C2B URL Registration
+ * Registers Validation and Confirmation URLs for standard C2B paybill/till
+ */
+app.post('/api/mpesa/c2b/register', async (req, res) => {
+  try {
+    const shortcode = req.body.shortCode || process.env.MPESA_SHORTCODE;
+    const responseType = req.body.responseType || 'Completed';
+    const confirmationUrl = req.body.confirmationUrl || process.env.MPESA_CALLBACK_URL;
+    const validationUrl = req.body.validationUrl || process.env.MPESA_CALLBACK_URL;
+
+    if (!shortcode || !confirmationUrl || !validationUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'shortCode, confirmationUrl, and validationUrl are required.',
+      });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      ShortCode: String(shortcode),
+      ResponseType: responseType,
+      ConfirmationURL: confirmationUrl,
+      ValidationURL: validationUrl,
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/c2b/v1/registerurl`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return res.status(response.ok ? 200 : 400).json({
+      success: response.ok,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error during C2B URL registration.',
+    });
+  }
+});
+
+/**
+ * Safaricom C2B Payment Simulation (Sandbox Only)
+ */
+app.post('/api/mpesa/c2b/simulate', async (req, res) => {
+  try {
+    const { shortCode, amount, msisdn, billRefNumber, commandId } = req.body;
+    if (!shortCode || !amount || !msisdn) {
+      return res.status(400).json({ success: false, error: 'shortCode, amount, and msisdn are required.' });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      ShortCode: String(shortCode),
+      CommandID: commandId || 'CustomerPayBillOnline',
+      Amount: String(Math.round(Number(amount))),
+      Msisdn: formatKenyanPhone(msisdn),
+      BillRefNumber: billRefNumber || 'TestPayment',
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/c2b/v1/simulate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return res.status(response.ok ? 200 : 400).json({
+      success: response.ok,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error during C2B simulation.',
+    });
+  }
+});
+
+/**
+ * Safaricom KYC & Identity Validation / SIM Swap Query
+ */
+app.post('/api/mpesa/kyc', async (req, res) => {
+  try {
+    const { action, phone, idNumber, idType, shortCode } = req.body;
+    const formatted = formatKenyanPhone(phone);
+    const accessToken = await getDarajaAccessToken();
+
+    if (action === 'sim-swap') {
+      const response = await fetch(`${BASE_URL}/imsi/v2/checkATI`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ customerNumber: formatted }),
+      });
+      const data = await response.json();
+      return res.status(response.ok ? 200 : 400).json({ success: response.ok, details: data });
+    }
+
+    // Default: Validate ID
+    const payload = {
+      requestRefID: `REF${Date.now()}`,
+      shortCode: String(shortCode || process.env.MPESA_SHORTCODE || '174379'),
+      msisdn: formatted,
+      idType: idType || 'NationalID',
+      idNumber: String(idNumber || ''),
+    };
+
+    const response = await fetch(`${BASE_URL}/v1/KYC-validation/validateID`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return res.status(response.ok ? 200 : 400).json({ success: response.ok, details: data });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error during KYC validation.',
     });
   }
 });
