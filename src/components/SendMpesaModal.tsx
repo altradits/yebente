@@ -15,6 +15,7 @@ import {
 import {
   sendMpesaPayout,
   formatKenyanDisplayPhone,
+  isValidKenyanPhone,
   VerifyRecipientResponse,
   VerifyC2BResponse,
   verifyC2BHakikisha,
@@ -550,10 +551,16 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
               </div>
 
               {/* Recipient verification requirement badge */}
-              {recipientType === 'phone' && (!verifiedInfo || !verifiedInfo.verified) && (
+              {recipientType === 'phone' && (!verifiedInfo || !verifiedInfo.verified) && isValidKenyanPhone(phone) && (
                 <div className="flex items-center gap-2 p-3 rounded-2xl bg-amber-950/20 border border-amber-500/30 text-amber-300 text-xs">
                   <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
-                  <span>Receiver name must be verified on M-Pesa before transfer can be initiated.</span>
+                  <span>Hakikisha unverified in sandbox: Payment will dispatch to +{phone}.</span>
+                </div>
+              )}
+              {recipientType === 'phone' && !isValidKenyanPhone(phone) && (
+                <div className="flex items-center gap-2 p-3 rounded-2xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] text-xs">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-[#9B97A2]" />
+                  <span>Enter a valid 9-digit Kenyan phone number (e.g. 712 345 678).</span>
                 </div>
               )}
 
@@ -563,7 +570,9 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 onClick={handleConfirm}
                 disabled={
                   numericAmount <= 0 ||
-                  (recipientType === 'phone' && (!verifiedInfo || !verifiedInfo.verified)) ||
+                  (recipientType === 'phone' && !isValidKenyanPhone(phone)) ||
+                  (recipientType === 'till' && !tillNumber.trim()) ||
+                  (recipientType === 'paybill' && (!paybillNumber.trim() || !accountNumber.trim())) ||
                   isInsufficientSats ||
                   isInsufficientKes
                 }
@@ -571,8 +580,8 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
               >
                 <Send className="w-4 h-4" />
                 <span>
-                  {recipientType === 'phone' && (!verifiedInfo || !verifiedInfo.verified)
-                    ? 'Verify Recipient Name to Send'
+                  {recipientType === 'phone' && !isValidKenyanPhone(phone)
+                    ? 'Enter Valid Kenyan Phone Number'
                     : isInsufficientSats
                     ? 'Insufficient Sats Balance'
                     : isInsufficientKes

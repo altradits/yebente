@@ -50,10 +50,17 @@ function getTimestamp() {
   return `${year}${month}${day}${hours}${minutes}${seconds}`;
 }
 
+let cachedAccessToken = null;
+let tokenExpiresAt = 0;
+
 /**
  * Obtain OAuth Access Token from Safaricom Daraja API
  */
 async function getDarajaAccessToken() {
+  if (cachedAccessToken && Date.now() < tokenExpiresAt) {
+    return cachedAccessToken;
+  }
+
   const consumerKey = process.env.MPESA_CONSUMER_KEY;
   const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
 
@@ -74,7 +81,12 @@ async function getDarajaAccessToken() {
   }
 
   const data = await response.json();
-  return data.access_token;
+  cachedAccessToken = data.access_token;
+  // Safaricom tokens are valid for 3599 seconds; refresh 60 seconds before expiry
+  const expiresInMs = (parseInt(data.expires_in, 10) || 3599) * 1000;
+  tokenExpiresAt = Date.now() + Math.max(expiresInMs - 60000, 60000);
+
+  return cachedAccessToken;
 }
 
 // Health check endpoint

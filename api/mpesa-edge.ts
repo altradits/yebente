@@ -56,7 +56,14 @@ function getTimestamp(): string {
   return `${year}${month}${day}${hours}${minutes}${seconds}`;
 }
 
+let cachedEdgeToken: string | null = null;
+let edgeTokenExpiresAt = 0;
+
 async function getDarajaToken(baseUrl: string, key: string, secret: string): Promise<string> {
+  if (cachedEdgeToken && Date.now() < edgeTokenExpiresAt) {
+    return cachedEdgeToken;
+  }
+
   const credentials = toBase64(`${key}:${secret}`);
   const response = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
     headers: {
@@ -70,6 +77,10 @@ async function getDarajaToken(baseUrl: string, key: string, secret: string): Pro
   }
 
   const data = await response.json();
+  cachedEdgeToken = data.access_token;
+  const expiresInMs = (parseInt(data.expires_in, 10) || 3599) * 1000;
+  edgeTokenExpiresAt = Date.now() + Math.max(expiresInMs - 60000, 60000);
+
   return data.access_token;
 }
 

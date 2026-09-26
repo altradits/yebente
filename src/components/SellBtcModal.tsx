@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
-import { formatKenyanDisplayPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
+import { formatKenyanDisplayPhone, isValidKenyanPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
 
 interface SellBtcModalProps {
   isOpen: boolean;
@@ -295,10 +295,16 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                       />
                     </div>
 
-                    {(!verifiedInfo || !verifiedInfo.verified) && (
+                    {(!verifiedInfo || !verifiedInfo.verified) && isValidKenyanPhone(phone) && (
                       <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-amber-300 text-[11px]">
                         <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                        <span>Receiver name must be verified on M-Pesa before payout can be initiated.</span>
+                        <span>Hakikisha unverified in sandbox: Payout will dispatch to +{phone}.</span>
+                      </div>
+                    )}
+                    {(!verifiedInfo || !verifiedInfo.verified) && !isValidKenyanPhone(phone) && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] text-[11px]">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-[#9B97A2]" />
+                        <span>Enter a valid 9-digit Kenyan phone number (e.g. 712 345 678).</span>
                       </div>
                     )}
                   </>
@@ -343,14 +349,15 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                 disabled={
                   numericSats <= 0 ||
                   (sourceMode === 'custodial' && numericSats > availableSats) ||
-                  (destination === 'mpesa' && (!verifiedInfo || !verifiedInfo.verified))
+                  (destination === 'mpesa' && !isValidKenyanPhone(phone)) ||
+                  (destination === 'telebirr' && (!phone.trim() || !recipientName.trim()))
                 }
                 className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
               >
                 {sourceMode === 'custodial' && numericSats > availableSats
                   ? 'Insufficient Sats Balance'
-                  : destination === 'mpesa' && (!verifiedInfo || !verifiedInfo.verified)
-                  ? 'Verify M-Pesa Receiver to Sell'
+                  : destination === 'mpesa' && !isValidKenyanPhone(phone)
+                  ? 'Enter Valid M-Pesa Phone Number'
                   : `Confirm Sell for ${Math.round(fiatPayout).toLocaleString()} ${currencyCode}`}
               </button>
             </>
