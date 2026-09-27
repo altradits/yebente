@@ -42,7 +42,7 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
         ? Math.round(Number(tx.toAmount || 0) * 100_000_000)
         : Number(tx.toAmount || 0);
       netSats += sats;
-    } else if (tx.type === 'sell_btc' || tx.type === 'send_mpesa' || tx.type === 'send_telebirr') {
+    } else if (tx.type === 'sell_btc' || tx.type === 'send_mpesa' || tx.type === 'send_telebirr' || tx.type === 'send_btc') {
       const sats = tx.fromCurrency === 'BTC'
         ? Math.round(Number(tx.fromAmount || 0) * 100_000_000)
         : Number(tx.fromAmount || 0);

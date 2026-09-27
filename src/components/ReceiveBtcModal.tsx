@@ -17,6 +17,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   wallet,
   onSuccess,
 }) => {
+  const [rail, setRail] = useState<'lightning' | 'onchain'>('lightning');
   const [step, setStep] = useState<'input' | 'invoice' | 'success' | 'error'>('input');
   const [satsAmountStr, setSatsAmountStr] = useState<string>('1000');
   const [memo, setMemo] = useState<string>('Deposit from Wallet of Satoshi');
@@ -28,6 +29,8 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   const [copiedInvoice, setCopiedInvoice] = useState(false);
   const [isCheckingSettlement, setIsCheckingSettlement] = useState(false);
   const [isNodeConfigured, setIsNodeConfigured] = useState(true);
+  const [onChainQrUrl, setOnChainQrUrl] = useState<string>('');
+  const [copiedOnChain, setCopiedOnChain] = useState(false);
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -164,6 +167,29 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     triggerSuccess(mockHash, numericSats);
   };
 
+  const onChainAddress =
+    wallet.nonCustodialAddress &&
+    !wallet.nonCustodialAddress.includes('@') &&
+    !wallet.nonCustodialAddress.toLowerCase().startsWith('lnbc')
+      ? wallet.nonCustodialAddress
+      : 'bc1q78p9k6e0r3g52al5vxwtu402r8k8y44a7q39d2';
+
+  useEffect(() => {
+    QRCode.toDataURL(`bitcoin:${onChainAddress}`, {
+      margin: 2,
+      width: 280,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    })
+      .then(setOnChainQrUrl)
+      .catch(() => {});
+  }, [onChainAddress]);
+
+  const handleCopyOnChain = () => {
+    navigator.clipboard.writeText(onChainAddress);
+    setCopiedOnChain(true);
+    setTimeout(() => setCopiedOnChain(false), 2000);
+  };
+
   return (
     <div
       onClick={handleBack}
@@ -192,6 +218,32 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
           {/* STEP 1: Input */}
           {step === 'input' && (
             <div className="space-y-4">
+              {/* Rail Selector: Lightning vs On-Chain */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRail('lightning')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    rail === 'lightning'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Lightning (L2)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRail('onchain')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    rail === 'onchain'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  On-Chain (Layer 1)
+                </button>
+              </div>
+
               {/* Current balance readout without button border */}
               <div className="flex justify-between items-center px-1 text-xs">
                 <span className="text-[#9B97A2]">Current Balance</span>
@@ -200,59 +252,111 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </span>
               </div>
 
-              {/* Sats amount input */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Sats to Receive
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="500"
-                    min="1"
-                    value={satsAmountStr}
-                    onChange={(e) => setSatsAmountStr(e.target.value)}
-                    onWheel={(e) => e.currentTarget.blur()}
-                    placeholder="1000"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                  <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
-                    Sats
-                  </span>
-                </div>
-              </div>
+              {/* Lightning Receive Flow */}
+              {rail === 'lightning' && (
+                <div className="space-y-4">
+                  {/* Sats amount input */}
+                  <div>
+                    <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                      Sats to Receive
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="500"
+                        min="1"
+                        value={satsAmountStr}
+                        onChange={(e) => setSatsAmountStr(e.target.value)}
+                        onWheel={(e) => e.currentTarget.blur()}
+                        placeholder="1000"
+                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                      />
+                      <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
+                        Sats
+                      </span>
+                    </div>
+                  </div>
 
-              {/* Quick Preset Buttons */}
-              <div className="grid grid-cols-4 gap-2">
-                {[500, 1000, 5000, 10000].map((preset) => (
+                  {/* Quick Preset Buttons */}
+                  <div className="grid grid-cols-4 gap-2">
+                    {[500, 1000, 5000, 10000].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSatsAmountStr(preset.toString())}
+                        className={`py-2 rounded-xl border text-xs font-mono font-medium transition-all ${
+                          numericSats === preset
+                            ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                            : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
+                        }`}
+                      >
+                        {preset.toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Optional Memo */}
+                  <div>
+                    <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                      Note
+                    </label>
+                    <input
+                      type="text"
+                      value={memo}
+                      onChange={(e) => setMemo(e.target.value)}
+                      placeholder="Deposit from Wallet of Satoshi"
+                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                    />
+                  </div>
+
+                  {/* Submit CTA Button */}
                   <button
-                    key={preset}
                     type="button"
-                    onClick={() => setSatsAmountStr(preset.toString())}
-                    className={`py-2 rounded-xl border text-xs font-mono font-medium transition-all ${
-                      numericSats === preset
-                        ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                        : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
+                    onClick={handleCreateInvoice}
+                    disabled={numericSats <= 0 || isGenerating}
+                    className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 shadow-md shadow-[#763698]/20"
                   >
-                    {preset.toLocaleString()}
+                    {isGenerating ? 'Generating...' : 'Create Invoice'}
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
 
-              {/* Optional Memo */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Note
-                </label>
-                <input
-                  type="text"
-                  value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
-                  placeholder="Deposit from Wallet of Satoshi"
-                  className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                />
-              </div>
+              {/* On-Chain Receive Flow */}
+              {rail === 'onchain' && (
+                <div className="space-y-4 flex flex-col items-center text-center">
+                  {onChainQrUrl && (
+                    <div className="p-3 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
+                      <img
+                        src={onChainQrUrl}
+                        alt="On-Chain Bitcoin Deposit QR Code"
+                        className="w-52 h-52 rounded-xl object-contain block"
+                      />
+                    </div>
+                  )}
+
+                  <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
+                    <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
+                      <span>On-Chain Deposit Address</span>
+                      <span className="font-mono text-[10px]">Layer 1</span>
+                    </div>
+                    <div className="font-mono text-[11px] text-[#D1B9B3] break-all select-all leading-relaxed">
+                      {onChainAddress}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyOnChain}
+                    className="w-full h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
+                  >
+                    {copiedOnChain ? 'Address Copied' : 'Copy Bitcoin Address'}
+                  </button>
+
+                  <p className="text-[11px] text-[#9B97A2] leading-relaxed px-2">
+                    Send Bitcoin from any exchange (Binance, Coinbase, Kraken) or hardware wallet (Trezor, Ledger, Sparrow). Confirms on-chain in 1 block.
+                  </p>
+                </div>
+              )}
 
               {/* Error Message */}
               {errorMessage && (

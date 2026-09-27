@@ -16,6 +16,7 @@ import { ActionGrid } from './components/ActionGrid';
 import { TransactionHistory } from './components/TransactionHistory';
 import { BuyBtcModal } from './components/BuyBtcModal';
 import { ReceiveBtcModal } from './components/ReceiveBtcModal';
+import { SendBtcModal } from './components/SendBtcModal';
 import { SellBtcModal } from './components/SellBtcModal';
 import { SendMpesaModal } from './components/SendMpesaModal';
 import { SendTelebirrModal } from './components/SendTelebirrModal';
@@ -49,7 +50,7 @@ export default function App() {
 
   // Modals
   const [activeModal, setActiveModal] = useState<
-    'none' | 'buy_btc' | 'receive_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr' | 'wallet_settings'
+    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr' | 'wallet_settings'
   >('none');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
@@ -158,10 +159,11 @@ export default function App() {
             />
           )}
 
-          {/* 2. Core Actions: Buy BTC, Receive BTC, Sell BTC, Send M-Pesa, Send Telebirr */}
+          {/* 2. Core Actions: Buy BTC, Receive BTC, Send BTC, Sell BTC, Send M-Pesa, Send Telebirr */}
           <ActionGrid
             onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
             onReceiveBtc={() => handleRequireWalletAction(() => setActiveModal('receive_btc'))}
+            onSendBtc={() => handleRequireWalletAction(() => setActiveModal('send_btc'))}
             onSellBtc={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
             onSendMpesa={() => setActiveModal('send_mpesa')}
             onSendTelebirr={() => setActiveModal('send_telebirr')}
@@ -241,6 +243,14 @@ export default function App() {
         isOpen={activeModal === 'receive_btc'}
         onClose={() => setActiveModal('none')}
         wallet={wallet}
+        onSuccess={handleTransactionSuccess}
+      />
+
+      <SendBtcModal
+        isOpen={activeModal === 'send_btc'}
+        onClose={() => setActiveModal('none')}
+        wallet={wallet}
+        rates={rates}
         onSuccess={handleTransactionSuccess}
       />
 
