@@ -316,9 +316,9 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               </div>
 
               {/* Sats preview */}
-              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
-                <span className="text-xs text-[#9B97A2]">You Receive</span>
-                <span className="text-base font-bold font-mono text-[#F8F0E7]">
+              <div className="flex justify-between items-center px-1 text-xs">
+                <span className="text-[#9B97A2]">You Receive</span>
+                <span className="font-mono font-bold text-[#F8F0E7]">
                   +{satsAmount.toLocaleString()} Sats
                 </span>
               </div>

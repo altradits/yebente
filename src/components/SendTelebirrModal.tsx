@@ -72,9 +72,9 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
           {step === 'input' && (
             <>
               {/* Balance Display */}
-              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
-                <span className="text-xs text-[#9B97A2]">Available</span>
-                <span className="text-xs font-mono font-bold text-[#F8F0E7]">
+              <div className="flex justify-between items-center px-1 text-xs">
+                <span className="text-[#9B97A2]">Available</span>
+                <span className="font-mono font-semibold text-[#D1B9B3]">
                   {availableEtb.toLocaleString()} ETB
                 </span>
               </div>

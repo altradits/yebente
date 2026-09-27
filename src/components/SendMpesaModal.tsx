@@ -217,9 +217,9 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
           {step === 'input' && (
             <>
               {/* Balance Display */}
-              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
-                <span className="text-xs text-[#9B97A2]">Available</span>
-                <span className="text-xs font-mono font-bold text-[#F8F0E7]">
+              <div className="flex justify-between items-center px-1 text-xs">
+                <span className="text-[#9B97A2]">Available</span>
+                <span className="font-mono font-semibold text-[#D1B9B3]">
                   {availableSats.toLocaleString()} Sats
                 </span>
               </div>
@@ -391,18 +391,18 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 </div>
               </div>
 
-              {/* Conversion Preview */}
-              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
-                <span className="text-xs text-[#9B97A2]">Total Sats</span>
-                <span className="text-base font-bold font-mono text-[#F8F0E7]">
-                  {(satsRequired + satsFee).toLocaleString()} Sats
-                </span>
-              </div>
-
-              {/* Fee */}
-              <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
-                <span>Fee</span>
-                <span>{satsFee} Sats</span>
+              {/* Summary */}
+              <div className="space-y-1.5 px-1 font-mono text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-[#9B97A2]">Total Sats</span>
+                  <span className="font-bold text-[#F8F0E7]">
+                    {(satsRequired + satsFee).toLocaleString()} Sats
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[#9B97A2]">
+                  <span>Fee</span>
+                  <span>{satsFee} Sats</span>
+                </div>
               </div>
 
               {/* Optional Note */}

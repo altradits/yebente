@@ -207,9 +207,9 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
               </div>
 
               {/* Payout calculation */}
-              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
-                <span className="text-xs text-[#9B97A2]">You Receive</span>
-                <span className="text-base font-bold font-mono text-[#F8F0E7]">
+              <div className="flex justify-between items-center px-1 text-xs">
+                <span className="text-[#9B97A2]">You Receive</span>
+                <span className="font-mono font-bold text-[#F8F0E7]">
                   {Math.round(fiatPayout).toLocaleString()} {currencyCode}
                 </span>
               </div>
