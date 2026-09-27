@@ -1,16 +1,33 @@
 # Ye₿ente Brand Development Kit (BDK) & Design Architecture
 
-This Brand Development Kit (BDK) defines the official design, asset, and token architecture for Ye₿ente. It provides developers and designers with an exact specification to implement new, yet-undefined features while preserving the minimalist Stan Style principles.
+**The Sovereign Design Standard for African Monetary Liberation.**
 
 ---
 
-## 1. Developer Palette Switcher Architecture
+## 1. The Ye₿ente Brand Manifesto
 
-Ye₿ente features a dynamic, centralized color engine located in [`src/theme/brandKit.ts`](file:///Users/mac/yebente/src/theme/brandKit.ts) and [`src/theme/ThemeContext.tsx`](file:///Users/mac/yebente/src/theme/ThemeContext.tsx).
+Ye₿ente was born to solve a generational injustice: everyday African households pay the highest remittance and cross-border payment taxes in the world, while watching their local purchasing power eroded by double-digit currency devaluations.
 
-### How to Define a New Palette (in 5 Lines)
+### What the Name Stands For
+- **"Ye" (የ)**: In Amharic and regional Ethiopian languages, the possessive prefix signifies **"of"**, **"belonging to"**, or **"for"** (*Ye-Bete* = of my house / for my home; *Ye-Sew* = of the people).
+- **"₿"**: The Bitcoin symbol at the exact center of our name represents hard, unconfiscatable, mathematically limited bearer money.
+- **"ente" / "bete"**: Anchors the concept of the African **Household, Family, and Home**.
+- **The Core Axiom**: **"Hard Money for the African Household."**
 
-Any developer can add a new color palette to the entire application by appending an entry to `PALETTES` in [`src/theme/brandKit.ts`](file:///Users/mac/yebente/src/theme/brandKit.ts):
+### Brand Soul & Persona
+- **Role**: Liberator, Guardian of Household Wealth, Direct Enabler of Sovereign Trade.
+- **Voice**: Dignified, Calm, Direct, Authoritative, Free of Crypto Speculation Hype.
+- **Tone**: Concise and action-focused. We never speak in confusing jargon to people who just want to send food, rent, or trade money to their family across the border.
+
+---
+
+## 2. Dynamic Palette Engine & Developer Experience
+
+Ye₿ente features an extensible theme engine located in [`src/theme/brandKit.ts`](file:///Users/mac/yebente/src/theme/brandKit.ts) and [`src/theme/ThemeContext.tsx`](file:///Users/mac/yebente/src/theme/ThemeContext.tsx).
+
+### How Any Developer Defines a New Palette (in 5 Lines)
+
+Any engineer or designer can define and register a new palette by appending an entry to `PALETTES` in [`src/theme/brandKit.ts`](file:///Users/mac/yebente/src/theme/brandKit.ts):
 
 ```typescript
 export const PALETTES: Record<string, BrandPalette> = {
@@ -44,29 +61,25 @@ export const PALETTES: Record<string, BrandPalette> = {
 };
 ```
 
-When added, the theme:
-1. Is automatically exposed in the settings palette selector.
-2. Injects CSS custom properties (`--bg-root`, `--accent-primary`, etc.) onto `document.documentElement`.
-3. Persists across page reloads via `localStorage`.
+When registered:
+1. It automatically populates the **Theme Palette** selector in [`WalletSettingsModal.tsx`](file:///Users/mac/yebente/src/components/WalletSettingsModal.tsx).
+2. It propagates CSS variables (`--bg-root`, `--accent-primary`, etc.) onto `document.documentElement`.
+3. It persists user preference seamlessly via `localStorage`.
 
-### Current Production Palettes
+### Production Palettes
 
 1. **Obsidian Plum** (`obsidianPlum`) [Default]:
-   - Royal Violet (`#763698`) and Warm Rose (`#946069`) on Deep Obsidian (`#120E16`).
-   - The canonical Stan Style palette for Ye₿ente.
+   - Royal Violet (`#763698`) and Warm Rose (`#946069`) on Deep Obsidian (`#120E16`). The canonical Stan Style palette.
 2. **Solar Amber** (`solarAmber`):
    - Bitcoin Gold (`#D97706`) and Bronze (`#B45309`) on Deep Charcoal (`#0E0D0B`).
-   - Optimized for Bitcoin-native and orange-pill user journeys.
 3. **Kigali Emerald** (`kigaliEmerald`):
-   - Deep Jade (`#059669`) and Teal (`#0D9488`) on Dark Pine (`#09120E`).
-   - Resonates with African mobile payment networks and cashout agent aesthetics.
+   - Deep Jade (`#059669`) and Teal (`#0D9488`) on Dark Pine (`#09120E`). Resonates with African mobile money rails.
 4. **Nile Slate** (`nileSlate`):
-   - Cobalt (`#2563EB`) and Sky Blue (`#0284C7`) on Midnight Steel (`#0A0F17`).
-   - Designed for corporate, institutional, and B2B treasury clearing.
+   - Cobalt (`#2563EB`) and Sky Blue (`#0284C7`) on Midnight Steel (`#0A0F17`). Designed for institutional treasury and B2B clearing.
 
 ---
 
-## 2. Company Asset & Logo Guidelines
+## 3. Company Asset & Logo Guidelines
 
 ### The Wordmark: Ye₿ente
 
@@ -100,7 +113,7 @@ The Ye₿ente wordmark is composed of three distinct typographic components:
 
 ---
 
-## 3. Blueprint for Incorporating New, Undefined Features
+## 4. Blueprint for Incorporating New Features
 
 When extending Ye₿ente with features not yet implemented (such as P2P escrow, merchant till clearing, automated dollar-cost-averaging, or cross-border remittance orderbooks), developers must follow these standard component recipes.
 
@@ -133,7 +146,7 @@ When extending Ye₿ente with features not yet implemented (such as P2P escrow, 
 
 ---
 
-## 4. Editorial and Quality Standards
+## 5. Editorial and Quality Standards
 
 1. **Zero Emojis**: Emojis are strictly banned from UI labels, placeholders, notification toasts, code comments, and documentation.
 2. **Zero Typographic Dashes**: Never use en-dashes or em-dashes. Use standard hyphens `-` or colons `:`.

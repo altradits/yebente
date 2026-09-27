@@ -183,7 +183,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
       try {
         const details = await resolveLightningAddress(externalAddress);
         if (details.success && details.callbackUrl) {
-          const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Yebente Sats Purchase');
+          const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Ye₿ente Sats Purchase');
           if (invRes.success && invRes.invoice) {
             setLightningInvoice(invRes.invoice);
           }
@@ -494,7 +494,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Credited To</span>
-                  <span className="text-emerald-400 font-semibold">Yebente Portfolio (+{satsAmount.toLocaleString()} Sats)</span>
+                  <span className="text-emerald-400 font-semibold">Ye₿ente Portfolio (+{satsAmount.toLocaleString()} Sats)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Paid Amount</span>
@@ -534,13 +534,13 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                     {lightningInvoice}
                   </p>
                   <p className="text-[10px] text-[#9B97A2] leading-relaxed">
-                    Sats have been credited to your Yebente vault balance. Automated node settlement requires configuring LNBITS_URL or LND_REST_URL in .env.
+                    Sats have been credited to your Ye₿ente vault balance. Automated node settlement requires configuring LNBITS_URL or LND_REST_URL in .env.
                   </p>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-emerald-300 text-xs w-full text-left">
                   <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span>{satsAmount.toLocaleString()} Sats added to your Yebente balance.</span>
+                  <span>{satsAmount.toLocaleString()} Sats added to your Ye₿ente balance.</span>
                 </div>
               )}
 
