@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowUpRight, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, AlertTriangle } from 'lucide-react';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
-import { formatKenyanDisplayPhone, isValidKenyanPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
+import { isValidKenyanPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
 
 interface SellBtcModalProps {
   isOpen: boolean;
@@ -38,7 +38,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const availableSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
   const numericSats = parseInt(satsAmountStr, 10) || 0;
   const fiatPayout = (numericSats / 100_000_000) * currentRate;
-  const satsFee = 500; // ~standard sats network fee
+  const satsFee = 500;
 
   const escrowAddress = 'bc1q78p9k6e0r3g52al5vxwtu402r8k8y44a7q39d2';
 
@@ -119,25 +119,30 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
     onClose();
   };
 
+  const handleBack = () => {
+    if (step === 'error') {
+      setStep('input');
+      setErrorMessage('');
+      return;
+    }
+    handleResetAndClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#946069]/25 border border-[#946069]/50 flex items-center justify-center text-[#D1B9B3]">
-              <ArrowUpRight className="w-4 h-4 text-[#F8F0E7]" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-[#F8F0E7]">Sell Sats</h2>
-            </div>
-          </div>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]/60">
           <button
-            onClick={handleResetAndClose}
-            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
+            type="button"
+            onClick={handleBack}
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            aria-label="Back"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <h2 className="text-base font-bold text-[#F8F0E7]">Sell Sats</h2>
+          <div className="w-8" aria-hidden="true" />
         </div>
 
         {/* Content body */}
@@ -145,34 +150,29 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
           {step === 'input' && (
             <>
               {/* Destination selector */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-2">
-                  Payout Mobile Destination
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleDestinationChange('mpesa')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-medium transition-all ${
-                      destination === 'mpesa'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7] shadow-sm shadow-[#763698]/20'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
-                  >
-                    M-Pesa (Kenya KES)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDestinationChange('telebirr')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-medium transition-all ${
-                      destination === 'telebirr'
-                        ? 'border-[#946069] bg-[#946069]/20 text-[#F8F0E7] shadow-sm shadow-[#946069]/20'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
-                  >
-                    Telebirr (Ethiopia ETB)
-                  </button>
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDestinationChange('mpesa')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    destination === 'mpesa'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  M-Pesa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDestinationChange('telebirr')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    destination === 'telebirr'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Telebirr
+                </button>
               </div>
 
               {/* Sats Amount to sell */}
@@ -207,112 +207,82 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
               </div>
 
               {/* Payout calculation */}
-              <div className="bg-[#140E1B]/90 border border-[#382B44] rounded-2xl p-3.5">
-                <div className="flex justify-between items-center text-xs text-[#9B97A2] mb-1">
-                  <span>You Will Receive</span>
-                  <span className="text-[11px] font-mono text-[#9B97A2]">
-                    Rate: 100,000 Sats = {Math.round(currentRate * 0.001).toLocaleString()} {currencyCode}
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold font-mono text-[#D1B9B3] tabular-nums">
-                    {Math.round(fiatPayout).toLocaleString()}
-                  </span>
-                  <span className="text-sm font-bold text-[#F8F0E7] font-mono">{currencyCode}</span>
-                </div>
+              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
+                <span className="text-xs text-[#9B97A2]">You Receive</span>
+                <span className="text-base font-bold font-mono text-[#F8F0E7]">
+                  {Math.round(fiatPayout).toLocaleString()} {currencyCode}
+                </span>
               </div>
 
-              {/* Source Mode (Custodial vs Non-Custodial) */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Sats Funding Source
-                </label>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setSourceMode('custodial')}
-                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
-                      sourceMode === 'custodial'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    Custodial (In-App)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSourceMode('external')}
-                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
-                      sourceMode === 'external'
-                        ? 'border-[#D1B9B3] bg-[#D1B9B3]/15 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    External Wallet (Self)
-                  </button>
-                </div>
+              {/* Source Mode */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSourceMode('custodial')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    sourceMode === 'custodial'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  In-App Vault
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceMode('external')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    sourceMode === 'external'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  External Address
+                </button>
+              </div>
 
-                {sourceMode === 'external' && (
-                  <div className="p-3.5 rounded-2xl bg-[#140E1B] border border-[#382B44] space-y-2">
-                    <div className="flex items-center justify-between text-[11px] text-[#9B97A2]">
-                      <span className="flex items-center gap-1.5">
-                        <QrCode className="w-3.5 h-3.5 text-[#D1B9B3]" />
-                        Send BTC To Escrow Address
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleCopyEscrow}
-                        className="text-[#D1B9B3] hover:text-[#F8F0E7] flex items-center gap-1 font-mono text-[10px]"
-                      >
-                        {copiedEscrow ? <Check className="w-3 h-3 text-[#D1B9B3]" /> : <Copy className="w-3 h-3" />}
-                        {copiedEscrow ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                    <div className="font-mono text-[11px] text-[#D1B9B3] break-all bg-[#1D1627] p-2.5 rounded-xl border border-[#382B44] select-all">
-                      {escrowAddress}
-                    </div>
+              {sourceMode === 'external' && (
+                <div className="p-3 rounded-2xl bg-[#140E1B] border border-[#382B44] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-[#9B97A2]">
+                    <span className="flex items-center gap-1.5">
+                      <QrCode className="w-3.5 h-3.5 text-[#D1B9B3]" />
+                      Escrow Address
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyEscrow}
+                      className="text-[#D1B9B3] hover:text-[#F8F0E7] flex items-center gap-1 font-mono text-[10px]"
+                    >
+                      {copiedEscrow ? <Check className="w-3 h-3 text-[#D1B9B3]" /> : <Copy className="w-3 h-3 text-[#9B97A2]" />}
+                      {copiedEscrow ? 'Copied' : 'Copy'}
+                    </button>
                   </div>
-                )}
-              </div>
+                  <div className="font-mono text-xs text-[#D1B9B3] break-all bg-[#1D1627] p-2.5 rounded-xl border border-[#382B44] select-all">
+                    {escrowAddress}
+                  </div>
+                </div>
+              )}
 
               {/* Recipient Phone & Name */}
               <div className="space-y-2.5">
                 {destination === 'mpesa' ? (
-                  <>
-                    <div className="space-y-1">
-                      <KenyaPhoneInput
-                        value={phone}
-                        onChange={(full) => {
-                          setPhone(full);
-                          if (verifiedInfo) setVerifiedInfo(null);
-                        }}
-                        onVerifiedChange={(info) => {
-                          setVerifiedInfo(info);
-                          if (info?.name) setRecipientName(info.name);
-                        }}
-                        label="M-Pesa Recipient Phone"
-                        autoVerify={false}
-                      />
-                    </div>
-
-                    {(!verifiedInfo || !verifiedInfo.verified) && isValidKenyanPhone(phone) && (
-                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-amber-300 text-[11px]">
-                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                        <span>Hakikisha unverified in sandbox: Payout will dispatch to +{phone}.</span>
-                      </div>
-                    )}
-                    {(!verifiedInfo || !verifiedInfo.verified) && !isValidKenyanPhone(phone) && (
-                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] text-[11px]">
-                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-[#9B97A2]" />
-                        <span>Enter a valid 9-digit Kenyan phone number (e.g. 712 345 678).</span>
-                      </div>
-                    )}
-                  </>
+                  <KenyaPhoneInput
+                    value={phone}
+                    onChange={(full) => {
+                      setPhone(full);
+                      if (verifiedInfo) setVerifiedInfo(null);
+                    }}
+                    onVerifiedChange={(info) => {
+                      setVerifiedInfo(info);
+                      if (info?.name) setRecipientName(info.name);
+                    }}
+                    label="Recipient Phone"
+                    autoVerify={false}
+                  />
                 ) : (
                   <>
                     <div>
                       <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                        Telebirr Recipient Phone
+                        Recipient Phone
                       </label>
                       <div className="relative">
                         <input
@@ -328,18 +298,24 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
 
                     <div>
                       <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                        Registered Account Name
+                        Account Name
                       </label>
                       <input
                         type="text"
                         value={recipientName}
                         onChange={(e) => setRecipientName(e.target.value)}
-                        placeholder="Recipient Full Name"
+                        placeholder="Recipient Name"
                         className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                       />
                     </div>
                   </>
                 )}
+              </div>
+
+              {/* Network fee summary */}
+              <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
+                <span>Fee</span>
+                <span>{satsFee} Sats</span>
               </div>
 
               {/* Submit CTA */}
@@ -352,13 +328,11 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                   (destination === 'mpesa' && !isValidKenyanPhone(phone)) ||
                   (destination === 'telebirr' && (!phone.trim() || !recipientName.trim()))
                 }
-                className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#946069]/25"
+                className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#946069]/20"
               >
                 {sourceMode === 'custodial' && numericSats > availableSats
                   ? 'Insufficient Sats Balance'
-                  : destination === 'mpesa' && !isValidKenyanPhone(phone)
-                  ? 'Enter Valid M-Pesa Phone Number'
-                  : `Confirm Sell for ${Math.round(fiatPayout).toLocaleString()} ${currencyCode}`}
+                  : 'Sell Sats'}
               </button>
             </>
           )}
@@ -396,10 +370,10 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
           {step === 'success' && (
             <div className="py-6 flex flex-col items-center text-center space-y-4">
               <div className="w-14 h-14 rounded-full bg-[#946069]/25 border border-[#946069]/50 flex items-center justify-center text-[#D1B9B3]">
-                <CheckCircle2 className="w-8 h-8" />
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Sats Cash Out Complete</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Sats Sold</h3>
               </div>
 
               <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
@@ -412,7 +386,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                   <span className="text-[#F8F0E7] font-bold">+{Math.round(fiatPayout).toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Recipient Phone</span>
+                  <span className="text-[#9B97A2]">Recipient</span>
                   <span className="text-[#D1B9B3]">+{phone}</span>
                 </div>
               </div>

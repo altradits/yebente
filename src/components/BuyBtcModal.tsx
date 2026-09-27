@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle, Zap, Copy, Check, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle, Zap, Copy, Check, RefreshCw } from 'lucide-react';
 import { initiateStkPush, queryStkStatus, isValidKenyanPhone, formatKenyanDisplayPhone } from '../services/mpesaService';
 import { isLightningAddress, resolveLightningAddress, createLightningInvoice } from '../services/lightningService';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
@@ -235,25 +235,34 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     onClose();
   };
 
+  const handleBack = () => {
+    if (step === 'awaiting_pin' || step === 'error' || step === 'success') {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setStep('input');
+      setErrorMessage('');
+      return;
+    }
+    handleResetAndClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
-              <ArrowDownLeft className="w-4 h-4 text-[#F8F0E7]" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-[#F8F0E7]">Buy Sats</h2>
-            </div>
-          </div>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]/60">
           <button
-            onClick={handleResetAndClose}
-            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
+            type="button"
+            onClick={handleBack}
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            aria-label="Back"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <h2 className="text-base font-bold text-[#F8F0E7]">Buy Sats</h2>
+          <div className="w-8" aria-hidden="true" />
         </div>
 
         {/* Content */}
@@ -261,47 +270,36 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
           {step === 'input' && (
             <>
               {/* Payment Rail Selector */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Payment Source
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSourceChange('mpesa')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-bold transition-all ${
-                      source === 'mpesa'
-                        ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7] shadow-md shadow-[#763698]/20'
-                        : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
-                  >
-                    <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                    <span>M-Pesa (Safaricom)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSourceChange('telebirr')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-bold transition-all ${
-                      source === 'telebirr'
-                        ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7] shadow-md shadow-[#763698]/20'
-                        : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
-                  >
-                    <div className="w-2 h-2 rounded-full bg-amber-400" />
-                    <span>Telebirr (Ethio Telecom)</span>
-                  </button>
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSourceChange('mpesa')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    source === 'mpesa'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  M-Pesa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSourceChange('telebirr')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    source === 'telebirr'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Telebirr
+                </button>
               </div>
 
               {/* Amount to spend */}
               <div>
-                <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
-                  <span className="font-semibold">You Pay</span>
-                  <span className="font-mono text-[#9B97A2] text-[11px]">
-                    100,000 Sats ≈ {Math.round(currentRate * 0.001).toLocaleString()} {currencyCode}
-                  </span>
-                </div>
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                  Amount ({currencyCode})
+                </label>
                 <div className="relative">
                   <input
                     type="number"
@@ -318,64 +316,46 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               </div>
 
               {/* Sats preview */}
-              <div className="p-3.5 rounded-2xl bg-[#140E1B] border border-[#382B44]">
-                <div className="flex justify-between items-center text-xs text-[#9B97A2] mb-1">
-                  <span>You Receive</span>
-                  <span className="font-mono font-semibold text-[#D1B9B3]">
-                    +{satsAmount.toLocaleString()} Sats
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold font-mono text-[#F8F0E7] tracking-tight">
-                    {satsAmount.toLocaleString()}
-                  </span>
-                  <span className="text-xs font-mono text-[#9B97A2]">
-                    ≈ {(satsAmount / 100_000_000).toFixed(6)} BTC
-                  </span>
-                </div>
+              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
+                <span className="text-xs text-[#9B97A2]">You Receive</span>
+                <span className="text-base font-bold font-mono text-[#F8F0E7]">
+                  +{satsAmount.toLocaleString()} Sats
+                </span>
               </div>
 
               {/* Destination Mode */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Deposit Destination
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDestMode('custodial')}
-                    className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                      destMode === 'custodial'
-                        ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                        : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                    }`}
-                  >
-                    In-App Custodial
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDestMode('external')}
-                    className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                      destMode === 'external'
-                        ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                        : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                    }`}
-                  >
-                    External Wallet / Address
-                  </button>
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDestMode('custodial')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    destMode === 'custodial'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  In-App Vault
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDestMode('external')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    destMode === 'external'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  External Address
+                </button>
               </div>
 
               {destMode === 'external' && (
                 <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    Lightning Address or Bitcoin Address
-                  </label>
                   <input
                     type="text"
                     value={externalAddress}
                     onChange={(e) => setExternalAddress(e.target.value)}
-                    placeholder="user@walletofsatoshi.com or bc1q..."
+                    placeholder="Lightning address or bc1q..."
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
                 </div>
@@ -386,12 +366,12 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 <KenyaPhoneInput
                   value={phone}
                   onChange={(full) => setPhone(full)}
-                  label="M-Pesa Phone Number (Prompt Recipient)"
+                  label="Phone Number"
                 />
               ) : (
                 <div>
                   <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    Telebirr Phone Number
+                    Phone Number
                   </label>
                   <input
                     type="tel"
@@ -405,7 +385,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
               {/* Network fee summary */}
               <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
-                <span>Estimated Carrier Network Fee</span>
+                <span>Fee</span>
                 <span>{estimatedFee} {currencyCode}</span>
               </div>
 
@@ -414,9 +394,9 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 type="button"
                 onClick={handleConfirm}
                 disabled={numericFiat <= 0 || !phone}
-                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#763698]/25"
+                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#763698]/20"
               >
-                Pay {numericFiat > 0 ? `${numericFiat.toLocaleString()} ${currencyCode}` : currencyCode} with {source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}
+                Buy Sats
               </button>
             </>
           )}
