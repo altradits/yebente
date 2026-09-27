@@ -37,12 +37,12 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
     if (tx.status !== 'completed') continue;
     if (!tx.referenceNumber || typeof tx.referenceNumber !== 'string' || !tx.referenceNumber.trim()) continue;
 
-    if (tx.type === 'buy_btc') {
+    if (tx.type === 'buy_btc' || tx.type === 'receive_btc') {
       const sats = tx.toCurrency === 'BTC'
         ? Math.round(Number(tx.toAmount || 0) * 100_000_000)
         : Number(tx.toAmount || 0);
       netSats += sats;
-    } else if (tx.type === 'sell_btc' || tx.type === 'send_mpesa') {
+    } else if (tx.type === 'sell_btc' || tx.type === 'send_mpesa' || tx.type === 'send_telebirr') {
       const sats = tx.fromCurrency === 'BTC'
         ? Math.round(Number(tx.fromAmount || 0) * 100_000_000)
         : Number(tx.fromAmount || 0);
@@ -101,15 +101,6 @@ export function saveStoredTransactions(txs: Transaction[]): void {
 export function clearStoredTransactions(): Transaction[] {
   try {
     localStorage.removeItem(TXS_STORAGE_KEY);
-    const raw = localStorage.getItem(WALLET_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.type === 'custodial') {
-        parsed.satsBalance = 0;
-        parsed.btcBalance = 0;
-        localStorage.setItem(WALLET_STORAGE_KEY, JSON.stringify(parsed));
-      }
-    }
   } catch {
     // ignore
   }
@@ -135,8 +126,8 @@ export function getStoredWallet(): UserWallet {
 
       let sats = 0;
       if (parsed.type === 'custodial') {
-        // Custodial balance is strictly derived from the ledger of verified completed transactions
-        sats = computeCustodialBalanceFromTransactions(validTxs);
+        const txSats = computeCustodialBalanceFromTransactions(validTxs);
+        sats = Math.max(txSats, typeof parsed.satsBalance === 'number' ? parsed.satsBalance : 0);
       } else {
         // Non-custodial balance: only retained if verified on-chain via Mempool/Blockstream or WebLN
         sats = parsed.onChainVerified && typeof parsed.satsBalance === 'number'

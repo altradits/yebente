@@ -1181,6 +1181,189 @@ app.post('/api/lightning/disburse', async (req, res) => {
 });
 
 /**
+ * Create a BOLT-11 Lightning Invoice to Receive Sats (e.g. from Wallet of Satoshi)
+ */
+app.post('/api/lightning/create-invoice', async (req, res) => {
+  try {
+    const { satsAmount, memo, customNodeUrl, customNodeKey } = req.body;
+    const amount = parseInt(satsAmount, 10);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'A positive satsAmount is required to generate a Lightning invoice.',
+      });
+    }
+
+    const lnbitsUrl = customNodeUrl || process.env.LNBITS_URL;
+    const lnbitsKey = customNodeKey || process.env.LNBITS_INVOICE_KEY || process.env.LNBITS_ADMIN_KEY;
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON;
+
+    // 1. LNbits Integration
+    if (lnbitsUrl && lnbitsKey) {
+      const cleanUrl = lnbitsUrl.replace(/\/+$/, '');
+      const invoiceRes = await fetch(`${cleanUrl}/api/v1/payments`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': lnbitsKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          out: false,
+          amount: amount,
+          memo: memo || 'Ye₿ente Deposit',
+        }),
+      });
+
+      const invoiceData = await invoiceRes.json();
+      if (!invoiceRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: invoiceData.detail || invoiceData.message || 'LNbits node failed to generate invoice.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        configured: true,
+        invoice: invoiceData.payment_request,
+        paymentHash: invoiceData.payment_hash,
+        satsAmount: amount,
+        nodeType: 'lnbits',
+      });
+    }
+
+    // 2. LND REST Integration
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const lndRes = await fetch(`${cleanUrl}/v1/invoices`, {
+        method: 'POST',
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          value: amount,
+          memo: memo || 'Ye₿ente Deposit',
+        }),
+      });
+
+      const lndData = await lndRes.json();
+      if (!lndRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.message || 'LND node failed to generate invoice.',
+        });
+      }
+
+      const paymentHash = lndData.r_hash
+        ? Buffer.from(lndData.r_hash, 'base64').toString('hex')
+        : '';
+
+      return res.json({
+        success: true,
+        configured: true,
+        invoice: lndData.payment_request,
+        paymentHash: paymentHash,
+        satsAmount: amount,
+        nodeType: 'lnd',
+      });
+    }
+
+    // 3. No node configured
+    return res.status(501).json({
+      success: false,
+      configured: false,
+      error: 'No Lightning node is configured. To accept live payments from Wallet of Satoshi, set LNBITS_URL & LNBITS_INVOICE_KEY (or LND_REST_URL & LND_MACAROON) in your .env.',
+      satsAmount: amount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error creating Lightning invoice.',
+    });
+  }
+});
+
+/**
+ * Check Invoice Settlement Status (Polling status for Wallet of Satoshi payment)
+ */
+app.get('/api/lightning/invoice-status/:paymentHash', async (req, res) => {
+  try {
+    const { paymentHash } = req.params;
+    const { customNodeUrl, customNodeKey } = req.query;
+
+    const lnbitsUrl = customNodeUrl || process.env.LNBITS_URL;
+    const lnbitsKey = customNodeKey || process.env.LNBITS_INVOICE_KEY || process.env.LNBITS_ADMIN_KEY;
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON;
+
+    // 1. LNbits Status Check
+    if (lnbitsUrl && lnbitsKey) {
+      const cleanUrl = lnbitsUrl.replace(/\/+$/, '');
+      const statusRes = await fetch(`${cleanUrl}/api/v1/payments/${paymentHash}`, {
+        headers: {
+          'X-Api-Key': lnbitsKey,
+        },
+      });
+
+      const statusData = await statusRes.json();
+      if (!statusRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: statusData.detail || 'Failed to query invoice status from LNbits.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: Boolean(statusData.paid),
+        paid: Boolean(statusData.paid),
+        satsAmount: statusData.details?.amount ? Math.round(statusData.details.amount / 1000) : 0,
+        preimage: statusData.preimage || statusData.details?.preimage || '',
+      });
+    }
+
+    // 2. LND Status Check
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const statusRes = await fetch(`${cleanUrl}/v1/invoice/${paymentHash}`, {
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+        },
+      });
+
+      const lndData = await statusRes.json();
+      if (!statusRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.message || 'Failed to query invoice status from LND.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: Boolean(lndData.settled),
+        paid: Boolean(lndData.settled),
+        satsAmount: Number(lndData.value) || 0,
+        preimage: lndData.r_preimage || '',
+      });
+    }
+
+    return res.status(501).json({
+      success: false,
+      configured: false,
+      error: 'Lightning node not configured for status check.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error checking invoice status.',
+    });
+  }
+});
+
+/**
  * Asynchronous Callback Webhook Receiver
  * Safaricom invokes this endpoint when payment processing finishes
  */

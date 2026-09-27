@@ -312,3 +312,102 @@ export async function queryWebLNBalance(): Promise<WebLNBalanceResult> {
     };
   }
 }
+
+export interface DepositInvoiceResponse {
+  success: boolean;
+  configured?: boolean;
+  invoice?: string;
+  paymentHash?: string;
+  satsAmount?: number;
+  error?: string;
+}
+
+export interface InvoiceStatusResponse {
+  success: boolean;
+  settled: boolean;
+  paid: boolean;
+  satsAmount?: number;
+  preimage?: string;
+  error?: string;
+}
+
+/**
+ * Creates a Lightning BOLT-11 deposit invoice via Ye₿ente backend
+ * to accept sats from Wallet of Satoshi or any Lightning wallet.
+ */
+export async function createDepositInvoice(
+  satsAmount: number,
+  memo?: string
+): Promise<DepositInvoiceResponse> {
+  try {
+    const res = await fetch('/api/lightning/create-invoice', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        satsAmount,
+        memo: memo || 'Ye₿ente Sats Deposit',
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return {
+        success: false,
+        configured: data.configured,
+        error: data.error || 'Failed to create Lightning invoice.',
+      };
+    }
+
+    return {
+      success: true,
+      configured: true,
+      invoice: data.invoice,
+      paymentHash: data.paymentHash,
+      satsAmount: data.satsAmount,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Network error creating invoice.';
+    return {
+      success: false,
+      error: message,
+    };
+  }
+}
+
+/**
+ * Polls the payment status of an active Lightning invoice.
+ */
+export async function checkInvoiceStatus(
+  paymentHash: string
+): Promise<InvoiceStatusResponse> {
+  try {
+    const res = await fetch(`/api/lightning/invoice-status/${encodeURIComponent(paymentHash)}`);
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        settled: false,
+        paid: false,
+        error: data.error || 'Failed to query invoice status.',
+      };
+    }
+
+    return {
+      success: true,
+      settled: Boolean(data.settled || data.paid),
+      paid: Boolean(data.settled || data.paid),
+      satsAmount: data.satsAmount,
+      preimage: data.preimage,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Network error checking invoice.';
+    return {
+      success: false,
+      settled: false,
+      paid: false,
+      error: message,
+    };
+  }
+}
