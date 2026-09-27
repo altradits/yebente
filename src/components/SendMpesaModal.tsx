@@ -1,16 +1,10 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import {
-  X,
-  Send,
-  Smartphone,
+  ArrowLeft,
   CheckCircle2,
   Loader2,
-  Store,
-  Hash,
   AlertTriangle,
-  Zap,
-  ShieldCheck,
 } from 'lucide-react';
 import {
   sendMpesaPayout,
@@ -37,7 +31,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   rates,
   onSuccess,
 }) => {
-  const [fundingSource, setFundingSource] = useState<'sats' | 'kes'>('sats');
   const [recipientType, setRecipientType] = useState<'phone' | 'till' | 'paybill'>('phone');
   const [phone, setPhone] = useState<string>('');
   const [verifiedInfo, setVerifiedInfo] = useState<VerifyRecipientResponse | null>(null);
@@ -81,12 +74,10 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const numericAmount = parseFloat(amountStr) || 0;
   const availableSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
 
-  // Sats calculation for Sats funding
   const btcKesRate = rates.btcKes;
   const satsRequired = btcKesRate > 0 ? Math.round((numericAmount / btcKesRate) * 100_000_000) : 0;
-  const satsFee = 250; // standard routing fee
+  const satsFee = 250;
 
-  // Check balance sufficiency
   const isInsufficientSats = satsRequired + satsFee > availableSats;
 
   const getRecipientDisplay = () => {
@@ -105,7 +96,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const handleConfirm = async () => {
     if (numericAmount <= 0) return;
 
-    if (fundingSource === 'sats' && btcKesRate <= 0) {
+    if (btcKesRate <= 0) {
       setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats conversion.');
       setStep('error');
       return;
@@ -195,95 +186,82 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
     onClose();
   };
 
+  const handleBack = () => {
+    if (step === 'error') {
+      setStep('input');
+      setErrorMessage('');
+      return;
+    }
+    handleResetAndClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#554653]/35 border border-[#554653] flex items-center justify-center text-[#D1B9B3]">
-              <Send className="w-4 h-4 text-[#F8F0E7]" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-[#F8F0E7]">Send to M-Pesa</h2>
-              <p className="text-[11px] text-[#9B97A2]">Pay directly with Sats or M-Pesa balance</p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]/60">
           <button
-            onClick={handleResetAndClose}
-            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
+            type="button"
+            onClick={handleBack}
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            aria-label="Back"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <h2 className="text-base font-bold text-[#F8F0E7]">Send M-Pesa</h2>
+          <div className="w-8" aria-hidden="true" />
         </div>
 
         {/* Content */}
         <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <>
-              {/* Funding Source Display */}
-              <div className="bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="text-xs font-semibold text-[#D1B9B3]">Funded via Sats Balance</span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-[#F8F0E7]">
-                    {availableSats.toLocaleString()} Sats
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] font-mono text-[#9B97A2] pt-1.5 border-t border-[#261D2E]">
-                  <span>Live Conversion:</span>
-                  <span>1 KES ≈ {btcKesRate > 0 ? (100_000_000 / btcKesRate).toFixed(1) : '0'} Sats</span>
-                </div>
+              {/* Balance Display */}
+              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
+                <span className="text-xs text-[#9B97A2]">Available</span>
+                <span className="text-xs font-mono font-bold text-[#F8F0E7]">
+                  {availableSats.toLocaleString()} Sats
+                </span>
               </div>
 
-              {/* Transfer Destination Category */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Transfer Category
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRecipientType('phone')}
-                    className={`py-2 px-2 rounded-2xl border text-xs font-medium flex flex-col items-center gap-1 transition-all ${
-                      recipientType === 'phone'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    <Smartphone className="w-3.5 h-3.5" />
-                    <span>Send Money</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRecipientType('till')}
-                    className={`py-2 px-2 rounded-2xl border text-xs font-medium flex flex-col items-center gap-1 transition-all ${
-                      recipientType === 'till'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    <Store className="w-3.5 h-3.5" />
-                    <span>Buy Goods</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRecipientType('paybill')}
-                    className={`py-2 px-2 rounded-2xl border text-xs font-medium flex flex-col items-center gap-1 transition-all ${
-                      recipientType === 'paybill'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    <Hash className="w-3.5 h-3.5" />
-                    <span>Paybill</span>
-                  </button>
-                </div>
+              {/* Transfer Category */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRecipientType('phone')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    recipientType === 'phone'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Phone
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecipientType('till')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    recipientType === 'till'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Till
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecipientType('paybill')}
+                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
+                    recipientType === 'paybill'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Paybill
+                </button>
               </div>
 
-              {/* Recipient Input with Kenya code and name verification */}
+              {/* Recipient Input */}
               {recipientType === 'phone' && (
                 <KenyaPhoneInput
                   value={phone}
@@ -292,14 +270,14 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                     if (verifiedInfo) setVerifiedInfo(null);
                   }}
                   onVerifiedChange={(info) => setVerifiedInfo(info)}
-                  label="Recipient Phone Number"
+                  label="Recipient Phone"
                   autoVerify={false}
                 />
               )}
 
               {recipientType === 'till' && (
-                <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-[#D1B9B3]">
                     Till Number
                   </label>
                   <input
@@ -309,31 +287,26 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                       setTillNumber(e.target.value);
                       if (c2bVerified) setC2bVerified(null);
                     }}
-                    placeholder="Enter 5-7 digit Till Number"
+                    placeholder="Till Number"
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
-                  <div className="mt-2 flex items-center justify-between">
+                  <div className="flex items-center justify-between text-xs">
                     <button
                       type="button"
                       onClick={handleVerifyC2b}
                       disabled={isVerifyingC2b || !tillNumber.trim()}
-                      className="px-2.5 py-1 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] text-[11px] font-mono flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                      className="px-2.5 py-1 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-colors disabled:opacity-50"
                     >
-                      {isVerifyingC2b ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#763698]" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#763698]" />
-                      )}
-                      <span>Verify Till (C2B Hakikisha)</span>
+                      {isVerifyingC2b ? 'Verifying...' : 'Verify'}
                     </button>
-                    {c2bVerified && recipientType === 'till' && (
-                      <span className="text-[11px] font-mono text-emerald-400 font-semibold truncate max-w-[200px]">
+                    {c2bVerified && (
+                      <span className="font-mono text-emerald-400 font-semibold truncate max-w-[200px]">
                         {c2bVerified.name}
                       </span>
                     )}
                   </div>
-                  {c2bError && recipientType === 'till' && (
-                    <div className="mt-1 text-[11px] font-mono text-[#946069]">
+                  {c2bError && (
+                    <div className="text-xs font-mono text-[#946069]">
                       {c2bError}
                     </div>
                   )}
@@ -341,7 +314,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
               )}
 
               {recipientType === 'paybill' && (
-                <div>
+                <div className="space-y-2">
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
@@ -354,7 +327,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                           setPaybillNumber(e.target.value);
                           if (c2bVerified) setC2bVerified(null);
                         }}
-                        placeholder="Paybill Number"
+                        placeholder="Business Number"
                         className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-3 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                       />
                     </div>
@@ -374,28 +347,23 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                       />
                     </div>
                   </div>
-                  <div className="mt-2 flex items-center justify-between">
+                  <div className="flex items-center justify-between text-xs">
                     <button
                       type="button"
                       onClick={handleVerifyC2b}
                       disabled={isVerifyingC2b || !paybillNumber.trim()}
-                      className="px-2.5 py-1 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] text-[11px] font-mono flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                      className="px-2.5 py-1 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-colors disabled:opacity-50"
                     >
-                      {isVerifyingC2b ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#763698]" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#763698]" />
-                      )}
-                      <span>Verify Paybill (C2B Hakikisha)</span>
+                      {isVerifyingC2b ? 'Verifying...' : 'Verify'}
                     </button>
-                    {c2bVerified && recipientType === 'paybill' && (
-                      <span className="text-[11px] font-mono text-emerald-400 font-semibold truncate max-w-[200px]">
+                    {c2bVerified && (
+                      <span className="font-mono text-emerald-400 font-semibold truncate max-w-[200px]">
                         {c2bVerified.name}
                       </span>
                     )}
                   </div>
-                  {c2bError && recipientType === 'paybill' && (
-                    <div className="mt-1 text-[11px] font-mono text-[#946069]">
+                  {c2bError && (
+                    <div className="text-xs font-mono text-[#946069]">
                       {c2bError}
                     </div>
                   )}
@@ -404,12 +372,9 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
 
               {/* Amount to send */}
               <div>
-                <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
-                  <span className="font-semibold">Recipient Receives (KES)</span>
-                  <span className="font-mono text-[11px] text-[#9B97A2]">
-                    Via Safaricom M-Pesa
-                  </span>
-                </div>
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                  Amount (KES)
+                </label>
                 <div className="relative">
                   <input
                     type="number"
@@ -418,61 +383,38 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                     onWheel={(e) => e.currentTarget.blur()}
                     placeholder="0"
                     min="1"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
-                  <span className="absolute right-4 top-3 font-mono text-sm font-semibold text-[#D1B9B3]">
+                  <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
                     KES
                   </span>
                 </div>
               </div>
 
-              {/* Conversion and Fee Breakdown */}
-              <div className="bg-[#140E1B]/90 border border-[#382B44] rounded-2xl p-3.5 space-y-2 text-xs">
-                <div className="flex justify-between text-[#9B97A2]">
-                  <span>Sats To Deduct</span>
-                  <span className="font-mono font-bold text-[#F8F0E7]">
-                    ~{satsRequired.toLocaleString()} Sats
-                  </span>
-                </div>
-                <div className="flex justify-between text-[#9B97A2]">
-                  <span>Lightning Routing Fee</span>
-                  <span className="font-mono">{satsFee} Sats</span>
-                </div>
-                <div className="flex justify-between text-[#D1B9B3] font-semibold border-t border-[#382B44] pt-2">
-                  <span>Total Sats Cost</span>
-                  <span className="font-mono text-[#F8F0E7] font-bold">
-                    {(satsRequired + satsFee).toLocaleString()} Sats
-                  </span>
-                </div>
+              {/* Conversion Preview */}
+              <div className="flex justify-between items-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
+                <span className="text-xs text-[#9B97A2]">Total Sats</span>
+                <span className="text-base font-bold font-mono text-[#F8F0E7]">
+                  {(satsRequired + satsFee).toLocaleString()} Sats
+                </span>
+              </div>
+
+              {/* Fee */}
+              <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
+                <span>Fee</span>
+                <span>{satsFee} Sats</span>
               </div>
 
               {/* Optional Note */}
               <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                  Payment Reference Note (Optional)
-                </label>
                 <input
                   type="text"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="e.g. Lunch, Supplies, Rent"
+                  placeholder="Note (optional)"
                   className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                 />
               </div>
-
-              {/* Recipient verification requirement badge */}
-              {recipientType === 'phone' && (!verifiedInfo || !verifiedInfo.verified) && isValidKenyanPhone(phone) && (
-                <div className="flex items-center gap-2 p-3 rounded-2xl bg-amber-950/20 border border-amber-500/30 text-amber-300 text-xs">
-                  <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
-                  <span>Hakikisha unverified in sandbox: Payment will dispatch to +{phone}.</span>
-                </div>
-              )}
-              {recipientType === 'phone' && !isValidKenyanPhone(phone) && (
-                <div className="flex items-center gap-2 p-3 rounded-2xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] text-xs">
-                  <ShieldCheck className="w-4 h-4 shrink-0 text-[#9B97A2]" />
-                  <span>Enter a valid 9-digit Kenyan phone number (e.g. 712 345 678).</span>
-                </div>
-              )}
 
               {/* Submit CTA */}
               <button
@@ -485,98 +427,79 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                   (recipientType === 'paybill' && (!paybillNumber.trim() || !accountNumber.trim())) ||
                   isInsufficientSats
                 }
-                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#763698] to-[#946069] hover:opacity-95 text-[#F8F0E7] text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#120E16]/80 disabled:opacity-50 transition-all active:scale-[0.99]"
+                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#763698]/20"
               >
-                <Send className="w-4 h-4" />
-                <span>
-                  {recipientType === 'phone' && !isValidKenyanPhone(phone)
-                    ? 'Enter Valid Kenyan Phone Number'
-                    : isInsufficientSats
-                    ? 'Insufficient Sats Balance'
-                    : `Send KES ${numericAmount.toLocaleString()} to ${verifiedInfo?.name ? verifiedInfo.name.split(' ')[0] : 'Recipient'}`}
-                </span>
+                {isInsufficientSats ? 'Insufficient Sats Balance' : 'Send M-Pesa'}
               </button>
             </>
           )}
 
           {step === 'processing' && (
-            <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
-              <Loader2 className="w-10 h-10 text-[#763698] animate-spin" />
-              <div className="font-bold text-[#F8F0E7]">
-                {fundingSource === 'sats' ? 'Converting Sats & Disbursing M-Pesa...' : 'Dispatching M-Pesa Payment...'}
+            <div className="py-8 flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-[#763698]/20 border border-[#763698]/40 flex items-center justify-center text-[#D1B9B3]">
+                <Loader2 className="w-8 h-8 animate-spin" />
               </div>
-              <div className="text-xs text-[#9B97A2] max-w-xs">
-                Sending KES {numericAmount.toLocaleString()} to {confirmedRecipientName || getRecipientDisplay()}
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Sending M-Pesa</h3>
               </div>
             </div>
           )}
 
-          {step === 'success' && (
-            <div className="py-8 flex flex-col items-center justify-center text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-                <CheckCircle2 className="w-8 h-8" />
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-red-950/30 border border-red-500/40 flex items-center justify-center text-red-400">
+                <AlertTriangle className="w-8 h-8" />
               </div>
-              <div className="space-y-1">
-                <div className="text-base font-bold text-[#F8F0E7]">M-Pesa Transfer Dispatched!</div>
-                <div className="text-xs text-[#9B97A2]">
-                  KES {numericAmount.toLocaleString()} sent to {confirmedRecipientName || getRecipientDisplay()}
-                </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Transfer Failed</h3>
+                <p className="text-xs text-red-300 mt-1 max-w-xs">{errorMessage}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {step === 'success' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">M-Pesa Sent</h3>
               </div>
 
-              <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-4 text-xs space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Verified Recipient</span>
-                  <span className="font-mono font-bold text-emerald-300">
-                    {confirmedRecipientName || verifiedInfo?.name || 'M-Pesa Subscriber'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Destination Number</span>
-                  <span className="font-mono text-[#F8F0E7]">{formatKenyanDisplayPhone(phone)}</span>
-                </div>
+              <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Amount Sent</span>
-                  <span className="font-mono font-bold text-[#F8F0E7]">KES {numericAmount.toLocaleString()}</span>
+                  <span className="text-[#F8F0E7] font-bold">{numericAmount.toLocaleString()} KES</span>
                 </div>
-                {fundingSource === 'sats' && (
+                <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Recipient</span>
+                  <span className="text-[#D1B9B3]">{confirmedRecipientName || getRecipientDisplay()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Sats Deducted</span>
+                  <span className="text-[#D1B9B3] font-bold">{(satsRequired + satsFee).toLocaleString()} Sats</span>
+                </div>
+                {realReference && (
                   <div className="flex justify-between">
-                    <span className="text-[#9B97A2]">Sats Deducted</span>
-                    <span className="font-mono font-bold text-amber-400">
-                      {(satsRequired + satsFee).toLocaleString()} Sats
-                    </span>
+                    <span className="text-[#9B97A2]">Reference</span>
+                    <span className="text-[#D1B9B3] text-[11px]">{realReference}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">M-Pesa Ref ID</span>
-                  <span className="font-mono text-[11px] text-[#D1B9B3]">{realReference}</span>
-                </div>
               </div>
 
               <button
                 type="button"
                 onClick={handleResetAndClose}
-                className="w-full py-3 px-4 rounded-2xl bg-[#2A1E37] text-[#F8F0E7] text-sm font-semibold hover:bg-[#342645] transition-colors"
+                className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
               >
                 Done
-              </button>
-            </div>
-          )}
-
-          {step === 'error' && (
-            <div className="py-8 flex flex-col items-center justify-center text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-[#946069]/20 border border-[#946069]/40 flex items-center justify-center text-[#946069]">
-                <AlertTriangle className="w-8 h-8" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-base font-bold text-[#F8F0E7]">Transfer Could Not Complete</div>
-                <div className="text-xs text-[#946069] max-w-xs">{errorMessage}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setStep('input')}
-                className="py-2.5 px-5 rounded-2xl bg-[#2A1E37] text-sm font-semibold text-[#F8F0E7]"
-              >
-                Try Again
               </button>
             </div>
           )}
