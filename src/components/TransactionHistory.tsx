@@ -128,14 +128,9 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
               }`}
             />
           </div>
-          <div>
-            <h2 className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
-              Transaction History
-            </h2>
-            <div className="text-[11px] text-[#9B97A2]">
-              {transactions.length} verified {transactions.length === 1 ? 'operation' : 'operations'} · {isCollapsed ? 'Tap to view' : 'Tap to collapse'}
-            </div>
-          </div>
+          <h2 className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
+            History
+          </h2>
         </button>
 
         <div className="flex items-center gap-1.5 shrink-0">
