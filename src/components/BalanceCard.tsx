@@ -116,50 +116,44 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <button
             onClick={() => setHideBalances(!hideBalances)}
-            className="p-1.5 rounded-xl bg-[#140E1B] border border-[#382B44] text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] hover:bg-[#261D32] transition-colors"
             aria-label={hideBalances ? 'Show digits' : 'Hide digits'}
           >
-            {hideBalances ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            {hideBalances ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
           <button
             onClick={handleSyncBalance}
             disabled={isSyncing}
-            className="p-1.5 rounded-xl bg-[#140E1B] border border-[#382B44] text-[#9B97A2] hover:text-[#F8F0E7] transition-colors disabled:opacity-50"
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] hover:bg-[#261D32] transition-colors disabled:opacity-50"
             aria-label="Sync Sats"
             title="Sync Sats"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#763698]' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-[#763698]' : ''}`} />
           </button>
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl bg-[#140E1B] border border-[#382B44] text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+              className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] hover:bg-[#261D32] transition-colors"
               title="Close"
               aria-label="Close"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
       </div>
 
-      {/* Two buttons alongside each other indicating country currency balance only */}
-      <div className="grid grid-cols-2 gap-2.5">
-        <button
-          type="button"
-          className="flex items-center justify-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44] text-sm font-bold font-mono text-[#F8F0E7] text-center"
-        >
+      {/* Country currency indicators alongside each other without button borders */}
+      <div className="grid grid-cols-2 gap-2.5 mt-3 pt-2.5 border-t border-[#382B44]/50">
+        <div className="text-center font-mono text-sm font-semibold text-[#D1B9B3]">
           {formattedKes}
-        </button>
-        <button
-          type="button"
-          className="flex items-center justify-center p-3 rounded-2xl bg-[#140E1B] border border-[#382B44] text-sm font-bold font-mono text-[#F8F0E7] text-center"
-        >
+        </div>
+        <div className="text-center font-mono text-sm font-semibold text-[#D1B9B3]">
           {formattedEtb}
-        </button>
+        </div>
       </div>
     </div>
   );
