@@ -3,6 +3,11 @@ import { UserWallet, WalletType } from '../types';
 import { fetchBitcoinAddressBalance, AddressBalanceResult } from '../services/blockchainService';
 import { queryWebLNBalance } from '../services/lightningService';
 import { computeCustodialBalanceFromTransactions, getStoredTransactions } from '../services/storageService';
+import {
+  hasEncryptedVault,
+  initializeOrUpdateVault,
+  wipeVaultStorage,
+} from '../services/vaultService';
 import { useTheme } from '../theme/ThemeContext';
 import {
   ArrowLeft,
@@ -41,6 +46,13 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
   const [copiedAddr, setCopiedAddr] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [onChainResult, setOnChainResult] = useState<AddressBalanceResult | null>(null);
+
+  // Vault Encryption & Master PIN state
+  const [vaultProtected, setVaultProtected] = useState(hasEncryptedVault());
+  const [pinInput, setPinInput] = useState('');
+  const [confirmPinInput, setConfirmPinInput] = useState('');
+  const [pinSuccessMessage, setPinSuccessMessage] = useState('');
+  const [showPinSetup, setShowPinSetup] = useState(false);
 
   const { paletteId, setPaletteId, availablePalettes } = useTheme();
 
@@ -145,6 +157,32 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
     onClose();
   };
 
+  const handleSavePin = async () => {
+    if (pinInput.length < 4) {
+      setValidationError('Master PIN must be at least 4 digits.');
+      return;
+    }
+    if (pinInput !== confirmPinInput) {
+      setValidationError('PIN confirmation does not match.');
+      return;
+    }
+    setValidationError('');
+    const res = await initializeOrUpdateVault(pinInput, {
+      inAppSecret: `sec_${Date.now().toString(36)}`,
+      rootAddress: address || wallet.nonCustodialAddress,
+    });
+    if (res.success) {
+      setVaultProtected(true);
+      setShowPinSetup(false);
+      setPinInput('');
+      setConfirmPinInput('');
+      setPinSuccessMessage('Vault encrypted with AES-256-GCM.');
+      setTimeout(() => setPinSuccessMessage(''), 3000);
+    } else {
+      setValidationError(res.error || 'Failed to encrypt vault.');
+    }
+  };
+
   const handleEject = () => {
     onEjectWallet();
     onClose();
@@ -152,6 +190,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
 
   const handleWipe = () => {
     if (confirm('Permanently wipe and remove all wallet keys and balances from this device?')) {
+      wipeVaultStorage();
       onWipeWallet();
       onClose();
     }
@@ -298,6 +337,77 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Sovereign Vault Encryption Section */}
+          <div className="space-y-2 pt-2 border-t border-[#382B44]/60">
+            <div className="flex justify-between items-center px-1 text-xs">
+              <span className="text-[#D1B9B3] font-semibold">Vault Security</span>
+              <span className="font-mono text-[11px] text-emerald-400">
+                {vaultProtected ? 'AES-256-GCM Active' : 'Unencrypted'}
+              </span>
+            </div>
+
+            {pinSuccessMessage && (
+              <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-emerald-300 text-xs font-mono">
+                {pinSuccessMessage}
+              </div>
+            )}
+
+            {!showPinSetup ? (
+              <button
+                type="button"
+                onClick={() => setShowPinSetup(true)}
+                className="w-full py-2.5 px-3 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-colors text-center"
+              >
+                {vaultProtected ? 'Update Master PIN' : 'Set Master PIN'}
+              </button>
+            ) : (
+              <div className="space-y-2 p-3 rounded-2xl bg-[#140E1B] border border-[#382B44]">
+                <div>
+                  <label className="block text-[11px] text-[#9B97A2] mb-1">Enter Master PIN (4-6 digits)</label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="••••••"
+                    className="w-full bg-[#1D1627] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-[#9B97A2] mb-1">Confirm Master PIN</label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={confirmPinInput}
+                    onChange={(e) => setConfirmPinInput(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="••••••"
+                    className="w-full bg-[#1D1627] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPinSetup(false);
+                      setPinInput('');
+                      setConfirmPinInput('');
+                    }}
+                    className="flex-1 py-2 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#9B97A2] text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSavePin}
+                    className="flex-1 py-2 rounded-xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-semibold text-xs transition-colors"
+                  >
+                    Save PIN
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Validation error display */}
           {validationError && (
