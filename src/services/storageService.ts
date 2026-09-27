@@ -1,4 +1,5 @@
 import { Transaction, UserWallet, WalletType } from '../types';
+import { getStoredSovereignAddress } from './vaultService';
 
 const WALLET_STORAGE_KEY = 'altradits_user_wallet_v1';
 const TXS_STORAGE_KEY = 'altradits_transactions_v1';
@@ -10,8 +11,8 @@ export const DEFAULT_WALLET: UserWallet = {
   btcBalance: 0,
   mpesaBalanceKes: 0,
   telebirrBalanceEtb: 0,
-  nonCustodialAddress: '',
-  nonCustodialLabel: '',
+  nonCustodialAddress: getStoredSovereignAddress(),
+  nonCustodialLabel: 'In-App Sovereign Address',
   insertedAt: Date.now(),
 };
 
@@ -22,8 +23,8 @@ export const DISCONNECTED_WALLET: UserWallet = {
   btcBalance: 0,
   mpesaBalanceKes: 0,
   telebirrBalanceEtb: 0,
-  nonCustodialAddress: '',
-  nonCustodialLabel: '',
+  nonCustodialAddress: getStoredSovereignAddress(),
+  nonCustodialLabel: 'In-App Sovereign Address',
 };
 
 /**
@@ -129,6 +130,11 @@ export function getStoredWallet(): UserWallet {
         parsed.nonCustodialAddress = '';
       }
 
+      // If address is empty, assign persistent sovereign Bitcoin address
+      if (!parsed.nonCustodialAddress) {
+        parsed.nonCustodialAddress = getStoredSovereignAddress();
+      }
+
       let sats = 0;
       if (parsed.type === 'custodial') {
         // Strictly compute from ledger of authentic completed transactions. Zero ghost money.
@@ -145,6 +151,7 @@ export function getStoredWallet(): UserWallet {
         ...DEFAULT_WALLET,
         ...parsed,
         isConnected: true,
+        nonCustodialAddress: parsed.nonCustodialAddress || getStoredSovereignAddress(),
         satsBalance: sats,
         btcBalance: sats / 100_000_000,
         mpesaBalanceKes: 0,

@@ -3,6 +3,7 @@ import { UserWallet, Transaction } from '../types';
 import { ArrowLeft, CheckCircle2, AlertCircle, Copy, Check, Loader2 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { createDepositInvoice, checkInvoiceStatus } from '../services/lightningService';
+import { getStoredSovereignAddress } from '../services/vaultService';
 
 interface ReceiveBtcModalProps {
   isOpen: boolean;
@@ -163,7 +164,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     !wallet.nonCustodialAddress.includes('@') &&
     !wallet.nonCustodialAddress.toLowerCase().startsWith('lnbc')
       ? wallet.nonCustodialAddress
-      : '';
+      : getStoredSovereignAddress();
 
   useEffect(() => {
     if (!onChainAddress) {

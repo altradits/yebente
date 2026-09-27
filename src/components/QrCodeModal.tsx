@@ -22,6 +22,7 @@ import {
   disburseBitcoinOnChain,
 } from '../services/lightningService';
 import { isValidBitcoinAddress, sanitizeBitcoinAddress } from '../services/blockchainService';
+import { getStoredSovereignAddress } from '../services/vaultService';
 
 interface QrCodeModalProps {
   isOpen: boolean;
@@ -92,19 +93,17 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
       ? wallet.nonCustodialAddress
       : '';
 
-  const shareableLightningText = userLightningAddress
-    ? userLightningAddress
-    : receivingAddress
-      ? `lightning:${receivingAddress}`
-      : '';
-
-  // Clean on-chain address if configured
-  const onChainAddress =
+  // Sovereign Bitcoin address (guaranteed non-empty)
+  const sovereignAddress =
     wallet.nonCustodialAddress &&
     !wallet.nonCustodialAddress.includes('@') &&
     !wallet.nonCustodialAddress.toLowerCase().startsWith('lnbc')
       ? wallet.nonCustodialAddress
-      : '';
+      : getStoredSovereignAddress();
+
+  const shareableLightningText = userLightningAddress
+    ? userLightningAddress
+    : `lightning:${receivingAddress || sovereignAddress}`;
 
   // Synchronize initial mode when modal opens
   useEffect(() => {
@@ -191,51 +190,52 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
         const satsToRequest = Math.max(1, receiveNumericSats);
         const res = await createDepositInvoice(satsToRequest, receiveMemo);
 
-        if (!res.success || !res.invoice) {
-          // If backend node is not configured, check if user has a configured Lightning Address to generate QR
-          if (userLightningAddress) {
-            setReceivingAddress(userLightningAddress);
-            const qrData = await QRCode.toDataURL(`lightning:${userLightningAddress}`, {
-              margin: 2,
-              width: 280,
-              color: { dark: '#000000', light: '#FFFFFF' },
-            });
-            setQrCodeDataUrl(qrData);
-            setReceiveError('');
-            return;
-          }
+        if (res.success && res.invoice) {
+          setReceivingAddress(res.invoice);
+          setPaymentHash(res.paymentHash || '');
 
-          setReceiveError(
-            res.error || 'Lightning node is not configured. Configure LNBITS or LND in .env.'
-          );
-          setQrCodeDataUrl('');
-          setReceivingAddress('');
+          const qrData = await QRCode.toDataURL(res.invoice.toUpperCase(), {
+            margin: 2,
+            width: 280,
+            color: { dark: '#000000', light: '#FFFFFF' },
+          });
+          setQrCodeDataUrl(qrData);
+
+          if (res.paymentHash) {
+            startPollingSettlement(res.paymentHash, satsToRequest);
+          }
           return;
         }
 
-        setReceivingAddress(res.invoice);
-        setPaymentHash(res.paymentHash || '');
+        // If backend node is not configured or offline, fallback to user's Lightning Address or sovereign address QR
+        if (userLightningAddress) {
+          setReceivingAddress(userLightningAddress);
+          const qrData = await QRCode.toDataURL(`lightning:${userLightningAddress}`, {
+            margin: 2,
+            width: 280,
+            color: { dark: '#000000', light: '#FFFFFF' },
+          });
+          setQrCodeDataUrl(qrData);
+          setReceiveError('');
+          return;
+        }
 
-        const qrData = await QRCode.toDataURL(res.invoice.toUpperCase(), {
+        // Generate immediate fallback QR using sovereign address with BIP-21 parameter
+        setReceivingAddress(sovereignAddress);
+        const amountBtc = (satsToRequest / 100_000_000).toFixed(8);
+        const btcUri = `bitcoin:${sovereignAddress}?amount=${amountBtc}&label=Yebente%20Deposit`;
+        const qrData = await QRCode.toDataURL(btcUri, {
           margin: 2,
           width: 280,
           color: { dark: '#000000', light: '#FFFFFF' },
         });
         setQrCodeDataUrl(qrData);
-
-        if (res.paymentHash) {
-          startPollingSettlement(res.paymentHash, satsToRequest);
-        }
+        setReceiveError('Lightning node offline in .env. Displaying sovereign Bitcoin deposit QR.');
       } else {
         // Layer 1 On-Chain
-        if (!onChainAddress) {
-          setQrCodeDataUrl('');
-          setReceivingAddress('');
-          return;
-        }
-
-        setReceivingAddress(onChainAddress);
-        const qrData = await QRCode.toDataURL(`bitcoin:${onChainAddress}`, {
+        const targetAddress = sovereignAddress;
+        setReceivingAddress(targetAddress);
+        const qrData = await QRCode.toDataURL(`bitcoin:${targetAddress}`, {
           margin: 2,
           width: 280,
           color: { dark: '#000000', light: '#FFFFFF' },
@@ -248,7 +248,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
     } finally {
       setIsGenerating(false);
     }
-  }, [rail, receiveNumericSats, receiveMemo, userLightningAddress, onChainAddress, startPollingSettlement]);
+  }, [rail, receiveNumericSats, receiveMemo, userLightningAddress, sovereignAddress, startPollingSettlement]);
 
   // Auto-generate QR code whenever receive mode or rail changes
   useEffect(() => {
@@ -648,23 +648,6 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                       alt="Bitcoin Receive QR Code"
                       className="w-52 h-52 rounded-xl object-contain block"
                     />
-                  </div>
-                ) : rail === 'onchain' && !onChainAddress ? (
-                  <div className="w-full bg-[#140E1B] border border-[#382B44] p-4 rounded-2xl text-center space-y-2">
-                    <p className="text-xs font-semibold text-[#F8F0E7]">No Layer 1 Address Configured</p>
-                    <p className="text-[11px] text-[#9B97A2] leading-relaxed">
-                      Configure your on-chain Bitcoin address in Wallet Settings to receive Layer 1 deposits directly.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenWalletSettings();
-                      }}
-                      className="w-full h-10 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs transition-colors"
-                    >
-                      Open Wallet Settings
-                    </button>
                   </div>
                 ) : null}
 
