@@ -1,5 +1,4 @@
 import React from 'react';
-import { Send, ArrowRight } from 'lucide-react';
 
 interface ActionGridProps {
   onBuyBtc: () => void;
@@ -39,47 +38,21 @@ export const ActionGrid: React.FC<ActionGridProps> = ({
       {/* 3. Send M-Pesa */}
       <button
         onClick={onSendMpesa}
-        className="group relative flex flex-col justify-between p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#D1B9B3]/70 hover:bg-[#261D32] active:scale-[0.98] transition-all text-left shadow-md shadow-[#120E16]/50 min-h-[96px]"
+        className="group relative flex items-center justify-center p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#D1B9B3]/70 hover:bg-[#261D32] active:scale-[0.98] transition-all text-center shadow-md shadow-[#120E16]/50 min-h-[96px]"
       >
-        <div className="flex items-center justify-between w-full">
-          <div className="w-10 h-10 rounded-2xl bg-[#554653]/35 border border-[#554653] flex items-center justify-center text-[#D1B9B3] group-hover:scale-105 group-hover:bg-[#554653]/50 transition-all">
-            <Send className="w-4 h-4 text-[#F8F0E7]" />
-          </div>
-          <span className="text-[10px] font-mono text-[#D1B9B3] font-medium">
-            Safaricom
-          </span>
-        </div>
-        <div className="mt-2.5">
-          <div className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
-            Send M-Pesa
-          </div>
-          <div className="text-[11px] text-[#9B97A2]">
-            KES to Phone or Till
-          </div>
-        </div>
+        <span className="text-base font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
+          Send M-Pesa
+        </span>
       </button>
 
       {/* 4. Send Telebirr */}
       <button
         onClick={onSendTelebirr}
-        className="group relative flex flex-col justify-between p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#763698]/70 hover:bg-[#261D32] active:scale-[0.98] transition-all text-left shadow-md shadow-[#120E16]/50 min-h-[96px]"
+        className="group relative flex items-center justify-center p-4 rounded-3xl bg-[#1E1727] border border-[#382B44] hover:border-[#763698]/70 hover:bg-[#261D32] active:scale-[0.98] transition-all text-center shadow-md shadow-[#120E16]/50 min-h-[96px]"
       >
-        <div className="flex items-center justify-between w-full">
-          <div className="w-10 h-10 rounded-2xl bg-[#3C2E49] border border-[#554653] flex items-center justify-center text-[#9B97A2] group-hover:scale-105 group-hover:bg-[#4C3A5C] transition-all">
-            <ArrowRight className="w-4 h-4 text-[#F8F0E7]" />
-          </div>
-          <span className="text-[10px] font-mono text-[#9B97A2] font-medium">
-            Ethio Telecom
-          </span>
-        </div>
-        <div className="mt-2.5">
-          <div className="text-sm font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
-            Send Telebirr
-          </div>
-          <div className="text-[11px] text-[#9B97A2]">
-            ETB to Mobile Account
-          </div>
-        </div>
+        <span className="text-base font-bold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
+          Send Telebirr
+        </span>
       </button>
     </div>
   );
