@@ -3,6 +3,7 @@ import { UserWallet, WalletType } from '../types';
 import { fetchBitcoinAddressBalance, AddressBalanceResult } from '../services/blockchainService';
 import { queryWebLNBalance } from '../services/lightningService';
 import { computeCustodialBalanceFromTransactions, getStoredTransactions } from '../services/storageService';
+import { useTheme } from '../theme/ThemeContext';
 import {
   ArrowLeft,
   Copy,
@@ -40,6 +41,8 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
   const [copiedAddr, setCopiedAddr] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [onChainResult, setOnChainResult] = useState<AddressBalanceResult | null>(null);
+
+  const { paletteId, setPaletteId, availablePalettes } = useTheme();
 
   if (!isOpen) return null;
 
@@ -303,6 +306,27 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
               <span>{validationError}</span>
             </div>
           )}
+
+          {/* Theme Palette Switcher */}
+          <div className="space-y-1.5 pt-1">
+            <span className="block text-xs font-semibold text-[#D1B9B3]">Theme Palette</span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {availablePalettes.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPaletteId(p.id)}
+                  className={`py-2 px-2 rounded-xl border text-xs font-medium transition-all text-center ${
+                    paletteId === p.id
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
+                  }`}
+                >
+                  {p.name.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Primary Action Button: Save / Connect */}
           <button
