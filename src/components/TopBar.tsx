@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserWallet } from '../types';
-import { Shield, ShieldAlert, Smartphone, Plus, LogOut, Settings } from 'lucide-react';
+import { Smartphone, Plus, LogOut, Settings } from 'lucide-react';
 
 interface TopBarProps {
   wallet: UserWallet;
@@ -59,18 +59,13 @@ export const TopBar: React.FC<TopBarProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 onClick={onToggleBalanceSection || onOpenWalletSettings}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all active:scale-95 ${
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all active:scale-95 ${
                   showBalanceSection
                     ? 'bg-[#763698] border-[#763698] text-[#F8F0E7] shadow-md shadow-[#763698]/30'
                     : 'bg-[#231A2D] border-[#3C2E49] hover:border-[#763698]/60 text-[#D1B9B3] hover:text-[#F8F0E7]'
                 }`}
                 title={showBalanceSection ? 'Hide Sats Balance' : 'Show Sats Balance'}
               >
-                {wallet.type === 'custodial' ? (
-                  <Shield className="w-3.5 h-3.5" />
-                ) : (
-                  <ShieldAlert className="w-3.5 h-3.5 text-[#763698]" />
-                )}
                 <span>Sats Balance</span>
               </button>
 
