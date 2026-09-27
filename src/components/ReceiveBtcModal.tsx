@@ -158,23 +158,18 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     setTimeout(() => setCopiedInvoice(false), 2000);
   };
 
-  // Development sandbox fallback trigger
-  const handleSimulatePayment = () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-    }
-    const mockHash = paymentHash || `sim_${Date.now().toString(36)}`;
-    triggerSuccess(mockHash, numericSats);
-  };
-
   const onChainAddress =
     wallet.nonCustodialAddress &&
     !wallet.nonCustodialAddress.includes('@') &&
     !wallet.nonCustodialAddress.toLowerCase().startsWith('lnbc')
       ? wallet.nonCustodialAddress
-      : 'bc1q78p9k6e0r3g52al5vxwtu402r8k8y44a7q39d2';
+      : '';
 
   useEffect(() => {
+    if (!onChainAddress) {
+      setOnChainQrUrl('');
+      return;
+    }
     QRCode.toDataURL(`bitcoin:${onChainAddress}`, {
       margin: 2,
       width: 280,
@@ -324,37 +319,50 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
               {/* On-Chain Receive Flow */}
               {rail === 'onchain' && (
                 <div className="space-y-4 flex flex-col items-center text-center">
-                  {onChainQrUrl && (
-                    <div className="p-3 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
-                      <img
-                        src={onChainQrUrl}
-                        alt="On-Chain Bitcoin Deposit QR Code"
-                        className="w-52 h-52 rounded-xl object-contain block"
-                      />
+                  {onChainAddress ? (
+                    <>
+                      {onChainQrUrl && (
+                        <div className="p-3 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
+                          <img
+                            src={onChainQrUrl}
+                            alt="On-Chain Bitcoin Deposit QR Code"
+                            className="w-52 h-52 rounded-xl object-contain block"
+                          />
+                        </div>
+                      )}
+
+                      <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
+                        <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
+                          <span>On-Chain Deposit Address</span>
+                          <span className="font-mono text-[10px]">Layer 1</span>
+                        </div>
+                        <div className="font-mono text-[11px] text-[#D1B9B3] break-all select-all leading-relaxed">
+                          {onChainAddress}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyOnChain}
+                        className="w-full h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
+                      >
+                        {copiedOnChain ? 'Address Copied' : 'Copy Bitcoin Address'}
+                      </button>
+
+                      <p className="text-[11px] text-[#9B97A2] leading-relaxed px-2">
+                        Send Bitcoin from any exchange (Binance, Coinbase, Kraken) or hardware wallet (Trezor, Ledger, Sparrow). Confirms on-chain in 1 block.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="w-full bg-[#140E1B] border border-[#382B44] p-4 rounded-2xl text-center space-y-2">
+                      <p className="text-xs font-semibold text-[#F8F0E7]">
+                        No Layer 1 Bitcoin Address Configured
+                      </p>
+                      <p className="text-[11px] text-[#9B97A2] leading-relaxed">
+                        Configure your on-chain Bitcoin address in Wallet Settings to receive Layer 1 deposits directly.
+                      </p>
                     </div>
                   )}
-
-                  <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
-                    <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
-                      <span>On-Chain Deposit Address</span>
-                      <span className="font-mono text-[10px]">Layer 1</span>
-                    </div>
-                    <div className="font-mono text-[11px] text-[#D1B9B3] break-all select-all leading-relaxed">
-                      {onChainAddress}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyOnChain}
-                    className="w-full h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
-                  >
-                    {copiedOnChain ? 'Address Copied' : 'Copy Bitcoin Address'}
-                  </button>
-
-                  <p className="text-[11px] text-[#9B97A2] leading-relaxed px-2">
-                    Send Bitcoin from any exchange (Binance, Coinbase, Kraken) or hardware wallet (Trezor, Ledger, Sparrow). Confirms on-chain in 1 block.
-                  </p>
                 </div>
               )}
 
@@ -365,16 +373,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                   <span>{errorMessage}</span>
                 </div>
               )}
-
-              {/* Submit CTA Button */}
-              <button
-                type="button"
-                onClick={handleCreateInvoice}
-                disabled={numericSats <= 0 || isGenerating}
-                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 shadow-md shadow-[#763698]/20"
-              >
-                {isGenerating ? 'Generating...' : 'Create Invoice'}
-              </button>
             </div>
           )}
 
@@ -425,17 +423,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
               >
                 {copiedInvoice ? 'Invoice Copied' : 'Copy Invoice'}
               </button>
-
-              {/* Development testing fallback */}
-              {!isNodeConfigured && (
-                <button
-                  type="button"
-                  onClick={handleSimulatePayment}
-                  className="w-full py-2 text-[11px] font-mono text-[#9B97A2] hover:text-[#F8F0E7] transition-colors underline"
-                >
-                  Simulate Settlement (Sandbox Test)
-                </button>
-              )}
             </div>
           )}
 

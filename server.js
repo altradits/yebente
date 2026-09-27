@@ -1181,6 +1181,129 @@ app.post('/api/lightning/disburse', async (req, res) => {
 });
 
 /**
+ * Disburse / Broadcast Bitcoin Layer 1 On-Chain Transaction
+ * Dispatches via LND on-chain wallet or Bitcoin Core RPC.
+ * Zero mock fallbacks: requires live node connection.
+ */
+app.post('/api/bitcoin/disburse', async (req, res) => {
+  try {
+    const { address, satsAmount, feeRate } = req.body;
+
+    if (!address || typeof address !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'A valid Bitcoin destination address is required.',
+      });
+    }
+
+    const cleanAddress = address.trim().replace(/^bitcoin:/i, '');
+    const amount = parseInt(satsAmount, 10);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'A positive satsAmount is required for on-chain disbursement.',
+      });
+    }
+
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON;
+    const btcRpcUrl = process.env.BITCOIN_RPC_URL;
+    const btcRpcUser = process.env.BITCOIN_RPC_USER;
+    const btcRpcPass = process.env.BITCOIN_RPC_PASSWORD;
+
+    // 1. If LND is configured with on-chain wallet
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const lndRes = await fetch(`${cleanUrl}/v1/transactions`, {
+        method: 'POST',
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          addr: cleanAddress,
+          amount: String(amount),
+          sat_per_vbyte: String(Math.max(1, parseInt(feeRate, 10) || 2)),
+        }),
+      });
+
+      const lndData = await lndRes.json();
+      if (!lndRes.ok || !lndData.txid) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.message || lndData.error || 'LND failed to broadcast on-chain transaction.',
+          details: lndData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        txid: lndData.txid,
+        referenceNumber: lndData.txid,
+        satsAmount: amount,
+        address: cleanAddress,
+        message: 'On-chain Bitcoin transaction broadcast successfully via LND node.',
+      });
+    }
+
+    // 2. If Bitcoin Core RPC is configured
+    if (btcRpcUrl) {
+      const authHeader = btcRpcUser && btcRpcPass
+        ? `Basic ${Buffer.from(`${btcRpcUser}:${btcRpcPass}`).toString('base64')}`
+        : undefined;
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (authHeader) headers.Authorization = authHeader;
+
+      const rpcPayload = {
+        jsonrpc: '1.0',
+        id: `yebente_${Date.now()}`,
+        method: 'sendtoaddress',
+        params: [cleanAddress, Number((amount / 100_000_000).toFixed(8))],
+      };
+
+      const rpcRes = await fetch(btcRpcUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(rpcPayload),
+      });
+
+      const rpcData = await rpcRes.json();
+      if (!rpcRes.ok || rpcData.error || !rpcData.result) {
+        return res.status(400).json({
+          success: false,
+          error: rpcData.error?.message || 'Bitcoin Core RPC failed to broadcast transaction.',
+          details: rpcData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        txid: rpcData.result,
+        referenceNumber: rpcData.result,
+        satsAmount: amount,
+        address: cleanAddress,
+        message: 'On-chain Bitcoin transaction broadcast successfully via Bitcoin Core node.',
+      });
+    }
+
+    // 3. If neither node is configured
+    return res.status(501).json({
+      success: false,
+      configured: false,
+      error: 'Bitcoin Layer 1 disbursement node is not configured. To broadcast on-chain transactions, configure LND (LND_REST_URL & LND_MACAROON) or Bitcoin RPC (BITCOIN_RPC_URL) in .env.',
+      address: cleanAddress,
+      satsAmount: amount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error processing on-chain Bitcoin disbursement.',
+    });
+  }
+});
+
+/**
  * Create a BOLT-11 Lightning Invoice to Receive Sats (e.g. from Wallet of Satoshi)
  */
 app.post('/api/lightning/create-invoice', async (req, res) => {

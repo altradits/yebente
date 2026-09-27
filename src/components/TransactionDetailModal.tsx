@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction } from '../types';
-import { X, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Copy, Check } from 'lucide-react';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -13,6 +13,8 @@ const TYPE_TITLES: Record<string, string> = {
   send_mpesa: 'Send M-Pesa',
   send_telebirr: 'Send Telebirr',
   deposit_mpesa: 'Deposit M-Pesa',
+  receive_btc: 'Receive Sats',
+  send_btc: 'Send Sats',
 };
 
 export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
@@ -38,13 +40,13 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   });
 
   const getAmountDisplay = () => {
-    if (transaction.type === 'buy_btc') {
+    if (transaction.type === 'buy_btc' || transaction.type === 'receive_btc') {
       const sats = transaction.toCurrency === 'BTC'
         ? Math.round(Number(transaction.toAmount || 0) * 100_000_000)
         : Number(transaction.toAmount || 0);
       return { text: `+${sats.toLocaleString()} Sats`, isPositive: true };
     }
-    if (transaction.type === 'sell_btc') {
+    if (transaction.type === 'sell_btc' || transaction.type === 'send_btc') {
       const sats = transaction.fromCurrency === 'BTC'
         ? Math.round(Number(transaction.fromAmount || 0) * 100_000_000)
         : Number(transaction.fromAmount || 0);
@@ -62,17 +64,26 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   const amount = getAmountDisplay();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl shadow-black/80 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
-          <span className="text-sm font-bold text-[#F8F0E7]">Details</span>
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl shadow-black/80 flex flex-col"
+      >
+        {/* Stan Style Header with Textless Back Navigation */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]/60">
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            aria-label="Back"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <h2 className="text-base font-bold text-[#F8F0E7]">Details</h2>
+          <div className="w-8" aria-hidden="true" />
         </div>
 
         {/* Content */}

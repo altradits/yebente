@@ -24,12 +24,8 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const [phone, setPhone] = useState<string>('');
   const [recipientName, setRecipientName] = useState<string>('');
   const [verifiedInfo, setVerifiedInfo] = useState<VerifyRecipientResponse | null>(null);
-  const [sourceMode, setSourceMode] = useState<'custodial' | 'external'>(
-    wallet.type === 'non-custodial' ? 'external' : 'custodial'
-  );
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [copiedEscrow, setCopiedEscrow] = useState(false);
 
   if (!isOpen) return null;
 
@@ -39,8 +35,8 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const numericSats = parseInt(satsAmountStr, 10) || 0;
   const fiatPayout = (numericSats / 100_000_000) * currentRate;
   const satsFee = 500;
-
-  const escrowAddress = 'bc1q78p9k6e0r3g52al5vxwtu402r8k8y44a7q39d2';
+  const totalDeducted = numericSats + satsFee;
+  const isInsufficientSats = totalDeducted > availableSats;
 
   const handleDestinationChange = (newDest: 'mpesa' | 'telebirr') => {
     setDestination(newDest);
@@ -48,14 +44,14 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
     setErrorMessage('');
   };
 
-  const handleCopyEscrow = () => {
-    navigator.clipboard.writeText(escrowAddress);
-    setCopiedEscrow(true);
-    setTimeout(() => setCopiedEscrow(false), 2000);
-  };
-
   const handleConfirm = async () => {
     if (numericSats <= 0) return;
+
+    if (isInsufficientSats) {
+      setErrorMessage(`Insufficient Sats balance. Required: ${totalDeducted.toLocaleString()} Sats (including ${satsFee} fee). Available: ${availableSats.toLocaleString()} Sats.`);
+      return;
+    }
+
     setStep('processing');
     setErrorMessage('');
 
@@ -102,7 +98,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
         feeCurrency: 'SATS',
         recipient: `+${phone} (${recipientName || verifiedInfo?.name || 'Recipient'})`,
         referenceNumber: refCode,
-        walletType: sourceMode === 'custodial' ? 'custodial' : 'non-custodial',
+        walletType: wallet.type,
         note: `Direct payout to ${destination === 'mpesa' ? 'M-Pesa' : 'Telebirr'} mobile account`,
       });
 
@@ -214,53 +210,17 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                 </span>
               </div>
 
-              {/* Source Mode */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSourceMode('custodial')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    sourceMode === 'custodial'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  In-App Vault
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSourceMode('external')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    sourceMode === 'external'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  External Address
-                </button>
-              </div>
-
-              {sourceMode === 'external' && (
-                <div className="p-3 rounded-2xl bg-[#140E1B] border border-[#382B44] space-y-2">
-                  <div className="flex items-center justify-between text-xs text-[#9B97A2]">
-                    <span className="flex items-center gap-1.5">
-                      <QrCode className="w-3.5 h-3.5 text-[#D1B9B3]" />
-                      Escrow Address
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCopyEscrow}
-                      className="text-[#D1B9B3] hover:text-[#F8F0E7] flex items-center gap-1 font-mono text-[10px]"
-                    >
-                      {copiedEscrow ? <Check className="w-3 h-3 text-[#D1B9B3]" /> : <Copy className="w-3 h-3 text-[#9B97A2]" />}
-                      {copiedEscrow ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-                  <div className="font-mono text-xs text-[#D1B9B3] break-all bg-[#1D1627] p-2.5 rounded-xl border border-[#382B44] select-all">
-                    {escrowAddress}
-                  </div>
+              {/* Fee and Total Deducted readout without button box */}
+              <div className="space-y-1.5 px-1 text-xs">
+                <div className="flex justify-between items-center text-[#9B97A2]">
+                  <span>Network Fee</span>
+                  <span className="font-mono text-[#D1B9B3]">{satsFee.toLocaleString()} Sats</span>
                 </div>
-              )}
+                <div className="flex justify-between items-center text-[#9B97A2]">
+                  <span>Total Deducted</span>
+                  <span className="font-mono font-bold text-[#F8F0E7]">{totalDeducted.toLocaleString()} Sats</span>
+                </div>
+              </div>
 
               {/* Recipient Phone & Name */}
               <div className="space-y-2.5">
@@ -324,15 +284,13 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                 onClick={handleConfirm}
                 disabled={
                   numericSats <= 0 ||
-                  (sourceMode === 'custodial' && numericSats > availableSats) ||
+                  isInsufficientSats ||
                   (destination === 'mpesa' && !isValidKenyanPhone(phone)) ||
                   (destination === 'telebirr' && (!phone.trim() || !recipientName.trim()))
                 }
                 className="w-full h-12 rounded-2xl bg-[#946069] hover:bg-[#A96E78] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#946069]/20"
               >
-                {sourceMode === 'custodial' && numericSats > availableSats
-                  ? 'Insufficient Sats Balance'
-                  : 'Sell Sats'}
+                {isInsufficientSats ? 'Insufficient Sats Balance' : 'Sell Sats'}
               </button>
             </>
           )}

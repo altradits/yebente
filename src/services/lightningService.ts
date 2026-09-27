@@ -411,3 +411,60 @@ export async function checkInvoiceStatus(
     };
   }
 }
+
+export interface DisburseBitcoinResponse {
+  success: boolean;
+  configured?: boolean;
+  txid?: string;
+  referenceNumber?: string;
+  satsAmount?: number;
+  error?: string;
+}
+
+/**
+ * Dispatches a Layer 1 on-chain Bitcoin transaction via Ye₿ente backend node.
+ * Strictly queries node broadcaster. Zero mock or simulated figures.
+ */
+export async function disburseBitcoinOnChain(
+  address: string,
+  satsAmount: number,
+  feeRate?: number
+): Promise<DisburseBitcoinResponse> {
+  try {
+    const res = await fetch('/api/bitcoin/disburse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        address,
+        satsAmount,
+        feeRate,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return {
+        success: false,
+        configured: data.configured,
+        error: data.error || 'Failed to broadcast on-chain Bitcoin transaction.',
+      };
+    }
+
+    return {
+      success: true,
+      configured: true,
+      txid: data.txid,
+      referenceNumber: data.referenceNumber || data.txid,
+      satsAmount: data.satsAmount,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Network error broadcasting on-chain transaction.';
+    return {
+      success: false,
+      error: message,
+    };
+  }
+}
+

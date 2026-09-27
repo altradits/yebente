@@ -5,6 +5,7 @@ import {
   isLightningAddress,
   resolveLightningAddress,
   createLightningInvoice,
+  disburseBitcoinOnChain,
 } from '../services/lightningService';
 import { isValidBitcoinAddress, sanitizeBitcoinAddress } from '../services/blockchainService';
 
@@ -159,24 +160,29 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
           return;
         }
 
-        // If in development sandbox without live node credentials, allow simulated settlement
-        if (!disburseData.configured) {
-          const simRef = `SIM-LN-${Date.now().toString(36).toUpperCase()}`;
-          setTxReference(simRef);
-          completeTransaction(simRef, cleanRecipient);
-          return;
-        }
-
-        setErrorMessage(disburseData.error || 'Failed to route Lightning payment.');
+        setErrorMessage(
+          disburseData.error ||
+          'Failed to route Lightning payment. Ensure your Lightning node (LNBITS_URL or LND) is configured in .env.'
+        );
         setStep('error');
         return;
       }
 
       // 3. If On-Chain Bitcoin Address
       if (recipientType === 'onchain') {
-        const onChainRef = `BTC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-        setTxReference(onChainRef);
-        completeTransaction(onChainRef, cleanRecipient);
+        const btcRes = await disburseBitcoinOnChain(cleanRecipient, numericSats, satsFee);
+        if (btcRes.success && (btcRes.txid || btcRes.referenceNumber)) {
+          const ref = btcRes.txid || btcRes.referenceNumber!;
+          setTxReference(ref);
+          completeTransaction(ref, cleanRecipient);
+          return;
+        }
+
+        setErrorMessage(
+          btcRes.error ||
+          'Failed to broadcast on-chain Bitcoin transaction. Ensure Bitcoin node credentials (LND or Bitcoin RPC) are configured in .env.'
+        );
+        setStep('error');
         return;
       }
 

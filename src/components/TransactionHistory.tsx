@@ -14,6 +14,8 @@ const TYPE_TITLES: Record<string, string> = {
   send_mpesa: 'Send M-Pesa',
   send_telebirr: 'Send Telebirr',
   deposit_mpesa: 'Deposit M-Pesa',
+  receive_btc: 'Receive Sats',
+  send_btc: 'Send Sats',
 };
 
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
@@ -58,13 +60,13 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   };
 
   const getAmountDisplay = (tx: Transaction) => {
-    if (tx.type === 'buy_btc') {
+    if (tx.type === 'buy_btc' || tx.type === 'receive_btc') {
       const sats = tx.toCurrency === 'BTC'
         ? Math.round(Number(tx.toAmount || 0) * 100_000_000)
         : Number(tx.toAmount || 0);
       return { text: `+${sats.toLocaleString()} Sats`, isPositive: true };
     }
-    if (tx.type === 'sell_btc') {
+    if (tx.type === 'sell_btc' || tx.type === 'send_btc') {
       const sats = tx.fromCurrency === 'BTC'
         ? Math.round(Number(tx.fromAmount || 0) * 100_000_000)
         : Number(tx.fromAmount || 0);

@@ -35,6 +35,8 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
   for (const tx of txs) {
     if (!tx || typeof tx !== 'object') continue;
     if (tx.status !== 'completed') continue;
+    // Strictly isolate custodial transactions; non-custodial transactions belong to external wallets
+    if (tx.walletType !== 'custodial') continue;
     if (!tx.referenceNumber || typeof tx.referenceNumber !== 'string' || !tx.referenceNumber.trim()) continue;
 
     if (tx.type === 'buy_btc' || tx.type === 'receive_btc') {
@@ -119,15 +121,18 @@ export function getStoredWallet(): UserWallet {
         return { ...DISCONNECTED_WALLET };
       }
 
-      // Clear legacy mock seed data if present in localStorage
-      if (parsed.nonCustodialAddress === 'bc1q9x38n7c4g2lpxym56d2t8k0l09a2q8u9478f7e') {
+      // Clear legacy mock seed addresses if present in localStorage
+      if (
+        parsed.nonCustodialAddress === 'bc1q9x38n7c4g2lpxym56d2t8k0l09a2q8u9478f7e' ||
+        parsed.nonCustodialAddress === 'bc1q78p9k6e0r3g52al5vxwtu402r8k8y44a7q39d2'
+      ) {
         parsed.nonCustodialAddress = '';
       }
 
       let sats = 0;
       if (parsed.type === 'custodial') {
-        const txSats = computeCustodialBalanceFromTransactions(validTxs);
-        sats = Math.max(txSats, typeof parsed.satsBalance === 'number' ? parsed.satsBalance : 0);
+        // Strictly compute from ledger of authentic completed transactions. Zero ghost money.
+        sats = computeCustodialBalanceFromTransactions(validTxs);
       } else {
         // Non-custodial balance: only retained if verified on-chain via Mempool/Blockstream or WebLN
         sats = parsed.onChainVerified && typeof parsed.satsBalance === 'number'
