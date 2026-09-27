@@ -1,11 +1,12 @@
 import React from 'react';
 import { UserWallet } from '../types';
-import { Smartphone, Plus, LogOut, Settings } from 'lucide-react';
+import { Smartphone, Plus, LogOut, Settings, QrCode } from 'lucide-react';
 
 interface TopBarProps {
   wallet: UserWallet;
   onOpenWalletSettings: () => void;
   onEjectWallet?: () => void;
+  onOpenQrCode?: () => void;
   isFrameMode: boolean;
   onToggleFrameMode: () => void;
   showBalanceSection?: boolean;
@@ -16,6 +17,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   wallet,
   onOpenWalletSettings,
   onEjectWallet,
+  onOpenQrCode,
   isFrameMode,
   onToggleFrameMode,
   showBalanceSection = false,
@@ -68,6 +70,18 @@ export const TopBar: React.FC<TopBarProps> = ({
               >
                 <span>Sats Balance</span>
               </button>
+
+              {onOpenQrCode && (
+                <button
+                  type="button"
+                  onClick={onOpenQrCode}
+                  className="w-8 h-8 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] flex items-center justify-center text-[#9B97A2] hover:text-[#F8F0E7] transition-colors active:scale-95"
+                  title="QR Code Receive / Send"
+                  aria-label="QR Code"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               <button
                 onClick={onOpenWalletSettings}

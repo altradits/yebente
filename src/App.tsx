@@ -22,6 +22,7 @@ import { SendMpesaModal } from './components/SendMpesaModal';
 import { SendTelebirrModal } from './components/SendTelebirrModal';
 import { TransactionDetailModal } from './components/TransactionDetailModal';
 import { WalletSettingsModal } from './components/WalletSettingsModal';
+import { QrCodeModal } from './components/QrCodeModal';
 import { ArrowDownLeft, ArrowUpRight, Send, ArrowRight } from 'lucide-react';
 
 export default function App() {
@@ -50,8 +51,9 @@ export default function App() {
 
   // Modals
   const [activeModal, setActiveModal] = useState<
-    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr' | 'wallet_settings'
+    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr' | 'wallet_settings' | 'qr_code'
   >('none');
+  const [qrInitialMode, setQrInitialMode] = useState<'receive' | 'send'>('receive');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
   // Load live rates
@@ -136,6 +138,10 @@ export default function App() {
           onToggleFrameMode={() => setIsFrameMode(!isFrameMode)}
           showBalanceSection={showBalanceSection}
           onToggleBalanceSection={() => setShowBalanceSection((prev) => !prev)}
+          onOpenQrCode={() => {
+            setQrInitialMode('receive');
+            setActiveModal('qr_code');
+          }}
         />
 
         {/* Main Content Area */}
@@ -162,8 +168,14 @@ export default function App() {
           {/* 2. Core Actions: Buy BTC, Receive BTC, Send BTC, Sell BTC, Send M-Pesa, Send Telebirr */}
           <ActionGrid
             onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
-            onReceiveBtc={() => handleRequireWalletAction(() => setActiveModal('receive_btc'))}
-            onSendBtc={() => handleRequireWalletAction(() => setActiveModal('send_btc'))}
+            onReceiveBtc={() => {
+              setQrInitialMode('receive');
+              setActiveModal('qr_code');
+            }}
+            onSendBtc={() => {
+              setQrInitialMode('send');
+              setActiveModal('qr_code');
+            }}
             onSellBtc={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
             onSendMpesa={() => setActiveModal('send_mpesa')}
             onSendTelebirr={() => setActiveModal('send_telebirr')}
@@ -289,6 +301,16 @@ export default function App() {
         onUpdateWallet={handleUpdateWallet}
         onEjectWallet={handleEjectWallet}
         onWipeWallet={handleWipeWallet}
+      />
+
+      <QrCodeModal
+        isOpen={activeModal === 'qr_code'}
+        onClose={() => setActiveModal('none')}
+        wallet={wallet}
+        rates={rates}
+        initialMode={qrInitialMode}
+        onSuccess={handleTransactionSuccess}
+        onOpenWalletSettings={() => setActiveModal('wallet_settings')}
       />
     </div>
   );
