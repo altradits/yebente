@@ -108,6 +108,11 @@ export default function App() {
   const handleClearHistory = () => {
     const cleared = clearStoredTransactions();
     setTransactions(cleared);
+    if (wallet.type === 'custodial') {
+      const updated = { ...wallet, satsBalance: 0, btcBalance: 0 };
+      setWallet(updated);
+      saveStoredWallet(updated);
+    }
   };
 
   return (

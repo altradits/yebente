@@ -22,6 +22,8 @@ export interface StkQueryResponse {
   resultDesc?: string;
   merchantRequestId?: string;
   checkoutRequestId?: string;
+  mpesaReceiptNumber?: string;
+  details?: any;
   error?: string;
 }
 
@@ -188,6 +190,8 @@ export async function queryStkStatus(checkoutRequestId: string): Promise<StkQuer
       resultDesc: data?.resultDesc,
       merchantRequestId: data?.merchantRequestId,
       checkoutRequestId: data?.checkoutRequestId,
+      mpesaReceiptNumber: data?.mpesaReceiptNumber,
+      details: data?.details,
       error: data?.error,
     };
   } catch (err: unknown) {

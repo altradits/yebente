@@ -209,6 +209,7 @@ app.post('/api/mpesa/query', async (req, res) => {
         responseCode: '0',
         resultCode: cb.resultCode,
         resultDesc: cb.resultDesc,
+        mpesaReceiptNumber: cb.mpesaReceiptNumber || null,
         checkoutRequestId,
         details: cb.payload,
       });
@@ -1193,11 +1194,21 @@ app.post('/api/mpesa/callback', (req, res) => {
   const resultCode = stkCallback?.ResultCode;
   const resultDesc = stkCallback?.ResultDesc;
 
+  let mpesaReceiptNumber = null;
+  const items = stkCallback?.CallbackMetadata?.Item;
+  if (Array.isArray(items)) {
+    const receiptItem = items.find((i) => i && i.Name === 'MpesaReceiptNumber');
+    if (receiptItem && receiptItem.Value) {
+      mpesaReceiptNumber = String(receiptItem.Value);
+    }
+  }
+
   const record = {
     receivedAt: timestamp,
     checkoutRequestId: checkoutRequestId || body?.ConversationID || `CB-${Date.now()}`,
     resultCode: resultCode ?? (body?.Result?.ResultCode ?? 0),
     resultDesc: resultDesc || body?.Result?.ResultDesc || 'Processed',
+    mpesaReceiptNumber: mpesaReceiptNumber || body?.Result?.TransactionID || null,
     payload: body,
   };
 

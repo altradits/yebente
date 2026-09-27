@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UserWallet, WalletType } from '../types';
 import { fetchBitcoinAddressBalance, AddressBalanceResult } from '../services/blockchainService';
 import { queryWebLNBalance, isLightningAddress } from '../services/lightningService';
+import { computeCustodialBalanceFromTransactions, getStoredTransactions } from '../services/storageService';
 import {
   X,
   ShieldCheck,
@@ -126,8 +127,8 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
         finalSats = 0;
       }
     } else {
-      // In-App Custodial Vault: starts at 0 or preserves real past purchases
-      finalSats = wallet.type === 'custodial' ? (wallet.satsBalance || 0) : 0;
+      // In-App Custodial Vault: strictly derived from verified completed transactions
+      finalSats = computeCustodialBalanceFromTransactions(getStoredTransactions());
     }
 
     const detectedLabel = onChainResult?.lightningProvider

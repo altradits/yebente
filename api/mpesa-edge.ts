@@ -225,6 +225,7 @@ export async function handleMpesaRequest(
           resultDesc: data.ResultDesc,
           merchantRequestId: data.MerchantRequestID,
           checkoutRequestId: data.CheckoutRequestID,
+          details: data,
         }),
         { headers: corsHeaders }
       );

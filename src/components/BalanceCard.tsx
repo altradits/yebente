@@ -3,6 +3,7 @@ import { UserWallet, ExchangeRates } from '../types';
 import { Copy, Check, Eye, EyeOff, ShieldCheck, KeyRound, LogOut, X, RefreshCw } from 'lucide-react';
 import { queryWebLNBalance, isLightningAddress } from '../services/lightningService';
 import { fetchBitcoinAddressBalance } from '../services/blockchainService';
+import { computeCustodialBalanceFromTransactions, getStoredTransactions } from '../services/storageService';
 
 interface BalanceCardProps {
   wallet: UserWallet;
@@ -34,7 +35,21 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     if (!wallet.isConnected) return;
     setIsSyncing(true);
     try {
-      // 1. If WebLN is present in browser, auto-query it first
+      // 1. If custodial wallet, sync balance strictly from verified transactions
+      if (wallet.type === 'custodial') {
+        const verifiedSats = computeCustodialBalanceFromTransactions(getStoredTransactions());
+        if (onUpdateWallet) {
+          onUpdateWallet({
+            ...wallet,
+            satsBalance: verifiedSats,
+            btcBalance: verifiedSats / 100_000_000,
+            lastSyncedAt: Date.now(),
+          });
+        }
+        return;
+      }
+
+      // 2. If WebLN is present in browser, auto-query it first
       const weblnRes = await queryWebLNBalance();
       if (weblnRes.available && typeof weblnRes.sats === 'number') {
         if (onUpdateWallet) {
