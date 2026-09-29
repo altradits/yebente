@@ -37,16 +37,20 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   const numericSats = parseInt(satsAmountStr, 10) || 0;
   const currentSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
 
-  // Stop polling on unmount or modal close
+  // Stop polling when the modal closes or unmounts.
   useEffect(() => {
+    if (!isOpen && pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
     };
-  }, []);
-
-  if (!isOpen) return null;
+  }, [isOpen]);
 
   const handleBack = () => {
     if (pollIntervalRef.current) {
@@ -70,7 +74,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     setErrorMessage('');
 
     try {
-      const res = await createDepositInvoice(numericSats, 'Deposit from Wallet of Satoshi');
+      const res = await createDepositInvoice(numericSats, 'YeBente Lightning Deposit');
 
       if (!res.success || !res.invoice) {
         setIsNodeConfigured(Boolean(res.configured));
@@ -85,7 +89,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
       setPaymentHash(res.paymentHash || '');
       setIsNodeConfigured(true);
 
-      // Generate high contrast QR code for Wallet of Satoshi scanner
+      // Generate a high-contrast QR code for wallet scanners.
       const qrData = await QRCode.toDataURL(res.invoice.toUpperCase(), {
         margin: 2,
         width: 280,
@@ -147,7 +151,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
       feeCurrency: 'SATS',
       referenceNumber: `LN-${hash.slice(0, 10).toUpperCase()}`,
       walletType: wallet.type,
-      note: 'Payment from Wallet of Satoshi',
+      note: 'Lightning deposit',
     });
   };
 
@@ -176,8 +180,10 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
       color: { dark: '#000000', light: '#FFFFFF' },
     })
       .then(setOnChainQrUrl)
-      .catch(() => {});
+      .catch(() => setOnChainQrUrl(''));
   }, [onChainAddress]);
+
+  if (!isOpen) return null;
 
   const handleCopyOnChain = () => {
     navigator.clipboard.writeText(onChainAddress);
@@ -373,7 +379,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </span>
               </div>
 
-              {/* High Contrast QR Code for Wallet of Satoshi scanning */}
+              {/* High-contrast QR code for wallet scanners */}
               {qrCodeUrl && (
                 <div className="p-3.5 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
                   <img
@@ -387,7 +393,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
               {/* Live Status indicator */}
               <div className="flex items-center gap-2 text-xs font-mono text-[#D1B9B3]">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-[#763698]" />
-                <span>Awaiting payment from Wallet of Satoshi...</span>
+                <span>Awaiting Lightning payment...</span>
               </div>
 
               {/* Truncated Invoice String */}

@@ -168,14 +168,8 @@ export default function App() {
           {/* 2. Core Actions: Buy BTC, Receive BTC, Send BTC, Sell BTC, Send M-Pesa, Send Telebirr */}
           <ActionGrid
             onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
-            onReceiveBtc={() => {
-              setQrInitialMode('receive');
-              setActiveModal('qr_code');
-            }}
-            onSendBtc={() => {
-              setQrInitialMode('send');
-              setActiveModal('qr_code');
-            }}
+            onReceiveBtc={() => setActiveModal('receive_btc')}
+            onSendBtc={() => setActiveModal('send_btc')}
             onSellBtc={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
             onSendMpesa={() => setActiveModal('send_mpesa')}
             onSendTelebirr={() => setActiveModal('send_telebirr')}
