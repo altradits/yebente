@@ -250,6 +250,7 @@ export default function App() {
         onClose={() => setActiveModal('none')}
         wallet={wallet}
         onSuccess={handleTransactionSuccess}
+        onOpenWalletSettings={() => setActiveModal('wallet_settings')}
       />
 
       <SendBtcModal

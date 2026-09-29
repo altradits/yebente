@@ -10,6 +10,7 @@ interface ReceiveBtcModalProps {
   onClose: () => void;
   wallet: UserWallet;
   onSuccess: (tx: Omit<Transaction, 'id' | 'timestamp'>) => void;
+  onOpenWalletSettings: () => void;
 }
 
 export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
@@ -17,6 +18,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   onClose,
   wallet,
   onSuccess,
+  onOpenWalletSettings,
 }) => {
   const [rail, setRail] = useState<'lightning' | 'onchain'>('lightning');
   const [step, setStep] = useState<'input' | 'invoice' | 'success' | 'error'>('input');
@@ -341,18 +343,19 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                         {copiedOnChain ? 'Address Copied' : 'Copy Bitcoin Address'}
                       </button>
 
-                      <p className="text-[11px] text-[#9B97A2] leading-relaxed px-2">
-                        Send Bitcoin from any exchange (Binance, Coinbase, Kraken) or hardware wallet (Trezor, Ledger, Sparrow). Confirms on-chain in 1 block.
-                      </p>
                     </>
                   ) : (
                     <div className="w-full bg-[#140E1B] border border-[#382B44] p-4 rounded-2xl text-center space-y-2">
                       <p className="text-xs font-semibold text-[#F8F0E7]">
                         No Layer 1 Bitcoin Address Configured
                       </p>
-                      <p className="text-[11px] text-[#9B97A2] leading-relaxed">
-                        Configure your on-chain Bitcoin address in Wallet Settings to receive Layer 1 deposits directly.
-                      </p>
+                      <button
+                        type="button"
+                        onClick={onOpenWalletSettings}
+                        className="w-full h-10 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs transition-colors"
+                      >
+                        Wallet Settings
+                      </button>
                     </div>
                   )}
                 </div>
@@ -427,9 +430,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
 
               <div className="space-y-1">
                 <h3 className="text-lg font-bold text-[#F8F0E7]">Payment Received</h3>
-                <p className="text-xs text-[#9B97A2]">
-                  Satoshis have been deposited into your Ye₿ente wallet.
-                </p>
               </div>
 
               <div className="p-3.5 bg-[#140E1B] border border-[#382B44] rounded-2xl space-y-2 text-left">
