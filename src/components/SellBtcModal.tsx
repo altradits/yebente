@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import { ArrowLeft, Smartphone, CheckCircle2, Loader2, QrCode, Copy, Check, AlertTriangle } from 'lucide-react';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
-import { isValidKenyanPhone, VerifyRecipientResponse, sendMpesaPayout } from '../services/mpesaService';
+import { isValidKenyanPhone, sendMpesaPayout } from '../services/mpesaService';
 
 interface SellBtcModalProps {
   isOpen: boolean;
@@ -23,7 +23,6 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
   const [satsAmountStr, setSatsAmountStr] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [recipientName, setRecipientName] = useState<string>('');
-  const [verifiedInfo, setVerifiedInfo] = useState<VerifyRecipientResponse | null>(null);
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
@@ -63,7 +62,6 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
           amount: Math.round(fiatPayout),
           currency: 'KES',
           satsAmount: numericSats,
-          recipientName: recipientName || verifiedInfo?.name,
           note: 'Sats Cashout to M-Pesa',
         });
 
@@ -96,7 +94,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
         rateUsed: currentRate,
         fee: satsFee,
         feeCurrency: 'SATS',
-        recipient: `+${phone} (${recipientName || verifiedInfo?.name || 'Recipient'})`,
+        recipient: `+${phone}${destination === 'telebirr' ? ` (${recipientName || 'Recipient'})` : ''}`,
         referenceNumber: refCode,
         walletType: wallet.type,
         note: `Direct payout to ${destination === 'mpesa' ? 'M-Pesa' : 'Telebirr'} mobile account`,
@@ -227,16 +225,8 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
                 {destination === 'mpesa' ? (
                   <KenyaPhoneInput
                     value={phone}
-                    onChange={(full) => {
-                      setPhone(full);
-                      if (verifiedInfo) setVerifiedInfo(null);
-                    }}
-                    onVerifiedChange={(info) => {
-                      setVerifiedInfo(info);
-                      if (info?.name) setRecipientName(info.name);
-                    }}
+                    onChange={(full) => setPhone(full)}
                     label="Recipient Phone"
-                    autoVerify={false}
                   />
                 ) : (
                   <>

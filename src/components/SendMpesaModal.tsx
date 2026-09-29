@@ -10,7 +10,6 @@ import {
   sendMpesaPayout,
   formatKenyanDisplayPhone,
   isValidKenyanPhone,
-  VerifyRecipientResponse,
   VerifyC2BResponse,
   verifyC2BHakikisha,
 } from '../services/mpesaService';
@@ -33,7 +32,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
 }) => {
   const [recipientType, setRecipientType] = useState<'phone' | 'till' | 'paybill'>('phone');
   const [phone, setPhone] = useState<string>('');
-  const [verifiedInfo, setVerifiedInfo] = useState<VerifyRecipientResponse | null>(null);
   const [tillNumber, setTillNumber] = useState<string>('');
   const [paybillNumber, setPaybillNumber] = useState<string>('');
   const [accountNumber, setAccountNumber] = useState<string>('');
@@ -42,7 +40,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [realReference, setRealReference] = useState<string>('');
-  const [confirmedRecipientName, setConfirmedRecipientName] = useState<string>('');
   const [c2bVerified, setC2bVerified] = useState<VerifyC2BResponse | null>(null);
   const [isVerifyingC2b, setIsVerifyingC2b] = useState(false);
   const [c2bError, setC2bError] = useState<string>('');
@@ -82,8 +79,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
 
   const getRecipientDisplay = () => {
     if (recipientType === 'phone') {
-      const nameTag = verifiedInfo?.name ? ` (${verifiedInfo.name})` : '';
-      return `${formatKenyanDisplayPhone(phone)}${nameTag}`;
+      return formatKenyanDisplayPhone(phone);
     }
     if (recipientType === 'till') {
       const nameTag = c2bVerified?.name ? ` (${c2bVerified.name})` : '';
@@ -108,11 +104,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         setStep('error');
         return;
       }
-      if (!verifiedInfo || !verifiedInfo.verified) {
-        setErrorMessage('Receiver name must be verified on M-Pesa via Hakikisha before sending can be initiated.');
-        setStep('error');
-        return;
-      }
     } else {
       setErrorMessage('Direct disbursement to Till and Paybill requires Safaricom B2B API credentials (MPESA_B2B_SHORTCODE). Only personal phone P2P transfers are currently supported.');
       setStep('error');
@@ -129,15 +120,11 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
     setErrorMessage('');
 
     try {
-      const recipientName = verifiedInfo?.name || formatKenyanDisplayPhone(phone);
-      setConfirmedRecipientName(recipientName);
-
       const res = await sendMpesaPayout({
         phone,
         amount: numericAmount,
         currency: 'KES',
         satsAmount: satsRequired,
-        recipientName,
         note: note || 'Sats to M-Pesa Transfer',
       });
 
@@ -170,7 +157,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         recipient: getRecipientDisplay(),
         referenceNumber: refCode,
         walletType: wallet.type,
-        note: note || `Sats cashout directly to ${recipientName} on M-Pesa`,
+        note: note || `Sats cashout directly to ${formatKenyanDisplayPhone(phone)} on M-Pesa`,
       });
 
       setStep('success');
@@ -265,13 +252,8 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
               {recipientType === 'phone' && (
                 <KenyaPhoneInput
                   value={phone}
-                  onChange={(full) => {
-                    setPhone(full);
-                    if (verifiedInfo) setVerifiedInfo(null);
-                  }}
-                  onVerifiedChange={(info) => setVerifiedInfo(info)}
+                  onChange={(full) => setPhone(full)}
                   label="Recipient Phone"
-                  autoVerify={false}
                 />
               )}
 
@@ -480,7 +462,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Recipient</span>
-                  <span className="text-[#D1B9B3]">{confirmedRecipientName || getRecipientDisplay()}</span>
+                  <span className="text-[#D1B9B3]">{getRecipientDisplay()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Sats Deducted</span>

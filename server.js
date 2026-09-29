@@ -264,11 +264,6 @@ app.post('/api/mpesa/query', async (req, res) => {
   }
 });
 
-const B2C_HAKIKISHA_URL =
-  DARAJA_ENV === 'production'
-    ? 'https://api.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha'
-    : 'https://sandbox.safaricom.co.ke/mpesa/b2c/hakikisha/v1/hakikisha';
-
 const C2B_HAKIKISHA_URL =
   DARAJA_ENV === 'production'
     ? 'https://api.safaricom.co.ke/c2b_hakikisha/v1/notify'
@@ -278,111 +273,6 @@ const B2B_HAKIKISHA_URL =
   DARAJA_ENV === 'production'
     ? 'https://api.safaricom.co.ke/sfcverify/v1/query/info'
     : 'https://sandbox.safaricom.co.ke/sfcverify/v1/query/info';
-
-/**
- * Safaricom B2C Hakikisha - Recipient Subscriber Name Verification
- * Queries Safaricom Daraja B2C Hakikisha endpoint. No fallback names.
- */
-app.post('/api/mpesa/hakikisha/b2c', async (req, res) => {
-  try {
-    const rawPhone = req.body.phone || req.query.phone;
-    if (!rawPhone) {
-      return res.status(400).json({ success: false, verified: false, error: 'Phone number is required.' });
-    }
-
-    const formatted = formatKenyanPhone(rawPhone);
-    if (!/^254[71]\d{8}$/.test(formatted)) {
-      return res.status(400).json({
-        success: false,
-        verified: false,
-        error: 'Invalid Kenyan phone format. Must be a valid Safaricom subscriber number (07XXXXXXXX or 01XXXXXXXX).',
-      });
-    }
-
-    const shortcode = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE || '600000';
-    const accessToken = await getDarajaAccessToken();
-
-    const payload = {
-      header: {
-        requestID: `REQ${Date.now()}`,
-        timestamp: new Date().toISOString(),
-      },
-      body: {
-        msisdn: formatted,
-        shortcode: String(shortcode),
-      },
-    };
-
-    const response = await fetch(B2C_HAKIKISHA_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const text = await response.text();
-    let hakikishaData = null;
-    try {
-      hakikishaData = text ? JSON.parse(text) : {};
-    } catch {
-      return res.status(response.status).json({
-        success: false,
-        verified: false,
-        error: `Safaricom B2C Hakikisha returned non-JSON response (${response.status}): ${text.slice(0, 200)}`,
-      });
-    }
-
-    if (!response.ok || (hakikishaData.header && hakikishaData.header.status !== '200')) {
-      const errMsg =
-        hakikishaData?.body?.message ||
-        hakikishaData?.header?.message ||
-        hakikishaData?.ResponseMessage ||
-        hakikishaData?.errorMessage ||
-        'Safaricom B2C Hakikisha lookup failed.';
-      return res.status(400).json({
-        success: false,
-        verified: false,
-        error: errMsg,
-        details: hakikishaData,
-      });
-    }
-
-    const b = hakikishaData?.body || {};
-    const nameParts = [b.firstName, b.middleName, b.lastName].filter(Boolean);
-    const resolvedName = nameParts.length > 0
-      ? nameParts.join(' ').trim()
-      : (b.CustomerName || b.ReceiverName || hakikishaData.CustomerName || hakikishaData.ReceiverName);
-
-    if (!resolvedName) {
-      return res.status(404).json({
-        success: false,
-        verified: false,
-        error: `Safaricom subscriber name not found for phone +${formatted}. Upstream response: ${JSON.stringify(hakikishaData)}`,
-        details: hakikishaData,
-      });
-    }
-
-    return res.json({
-      success: true,
-      verified: true,
-      phone: formatted,
-      formattedPhone: `+${formatted.slice(0, 3)} ${formatted.slice(3, 6)} ${formatted.slice(6, 9)} ${formatted.slice(9)}`,
-      name: resolvedName,
-      provider: 'Safaricom M-Pesa Hakikisha',
-      accountStatus: 'Active',
-      upstreamVerified: true,
-      details: hakikishaData,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      verified: false,
-      error: error.message || 'Internal server error during B2C Hakikisha verification.',
-    });
-  }
-});
 
 /**
  * Safaricom C2B Hakikisha - Paybill / Till Number Organization Verification
@@ -514,19 +404,13 @@ app.post('/api/mpesa/hakikisha/b2b', async (req, res) => {
   }
 });
 
-// Backwards-compatible alias for existing frontend callers
-app.post('/api/mpesa/verify-recipient', (req, res) => {
-  req.url = '/api/mpesa/hakikisha/b2c';
-  app.handle(req, res);
-});
-
 /**
  * B2C Payout / Disburse Sats or KES to M-Pesa Phone Number
  * Strictly queries Safaricom B2C API. No mock fallbacks.
  */
 app.post('/api/mpesa/payout', async (req, res) => {
   try {
-    const { phone, amount, currency, satsAmount, recipientName, note } = req.body;
+    const { phone, amount, currency, satsAmount, note } = req.body;
 
     if (!phone || !amount || Number(amount) <= 0) {
       return res.status(400).json({ success: false, error: 'Valid phone and amount are required.' });
@@ -595,7 +479,6 @@ app.post('/api/mpesa/payout', async (req, res) => {
     return res.json({
       success: true,
       referenceNumber: b2cData.ConversationID || b2cData.OriginatorConversationID,
-      recipientName: recipientName || formatted,
       phone: formatted,
       amount: Number(amount),
       currency: currency || 'KES',

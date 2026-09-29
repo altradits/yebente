@@ -203,17 +203,6 @@ export async function queryStkStatus(checkoutRequestId: string): Promise<StkQuer
   }
 }
 
-export interface VerifyRecipientResponse {
-  success: boolean;
-  verified: boolean;
-  phone?: string;
-  formattedPhone?: string;
-  name?: string;
-  provider?: string;
-  accountStatus?: string;
-  error?: string;
-}
-
 export interface VerifyC2BResponse {
   success: boolean;
   verified: boolean;
@@ -222,57 +211,6 @@ export interface VerifyC2BResponse {
   accountNumber?: string;
   provider?: string;
   error?: string;
-}
-
-/**
- * Verifies registered Safaricom subscriber name via Safaricom B2C Hakikisha API
- */
-export async function verifyMpesaRecipient(phone: string): Promise<VerifyRecipientResponse> {
-  const formatted = formatKenyanPhone(phone);
-
-  if (!isValidKenyanPhone(formatted)) {
-    return {
-      success: false,
-      verified: false,
-      error: 'Please enter a valid Kenyan Safaricom phone number (07XX... or 01XX...).',
-    };
-  }
-
-  try {
-    const response = await fetch('/api/mpesa/hakikisha/b2c', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ phone: formatted }),
-    });
-
-    const { ok, data } = await parseSafeJson<any>(response);
-
-    if (!ok || !data?.success) {
-      return {
-        success: false,
-        verified: false,
-        error: data?.error || 'Failed to verify M-Pesa recipient name via Hakikisha.',
-      };
-    }
-
-    return {
-      success: true,
-      verified: Boolean(data.verified),
-      phone: data.phone,
-      formattedPhone: data.formattedPhone,
-      name: data.name,
-      provider: data.provider,
-      accountStatus: data.accountStatus,
-    };
-  } catch (err: unknown) {
-    return {
-      success: false,
-      verified: false,
-      error: err instanceof Error ? err.message : 'Network error verifying recipient via Hakikisha.',
-    };
-  }
 }
 
 /**
@@ -337,14 +275,12 @@ export interface SendPayoutParams {
   amount: number;
   currency?: string;
   satsAmount?: number;
-  recipientName?: string;
   note?: string;
 }
 
 export interface SendPayoutResponse {
   success: boolean;
   referenceNumber?: string;
-  recipientName?: string;
   phone?: string;
   amount?: number;
   currency?: string;
@@ -370,7 +306,6 @@ export async function sendMpesaPayout(params: SendPayoutParams): Promise<SendPay
         amount: params.amount,
         currency: params.currency || 'KES',
         satsAmount: params.satsAmount || 0,
-        recipientName: params.recipientName,
         note: params.note,
       }),
     });
@@ -387,7 +322,6 @@ export async function sendMpesaPayout(params: SendPayoutParams): Promise<SendPay
     return {
       success: true,
       referenceNumber: data.referenceNumber,
-      recipientName: data.recipientName,
       phone: data.phone,
       amount: data.amount,
       currency: data.currency,

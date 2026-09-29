@@ -181,74 +181,96 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
   );
 
   // Auto-generate QR code for receiving sats
-  const generateReceiveQr = useCallback(async () => {
-    setReceiveError('');
-    setIsGenerating(true);
+  const generateReceiveQr = useCallback(
+    async (customSats?: number) => {
+      setReceiveError('');
+      setIsGenerating(true);
 
-    try {
-      if (rail === 'lightning') {
-        const satsToRequest = Math.max(1, receiveNumericSats);
-        const res = await createDepositInvoice(satsToRequest, receiveMemo);
+      try {
+        const activeSats = typeof customSats === 'number' ? customSats : receiveNumericSats;
+        const satsToRequest = Math.max(1, activeSats);
 
-        if (res.success && res.invoice) {
-          setReceivingAddress(res.invoice);
-          setPaymentHash(res.paymentHash || '');
+        if (rail === 'lightning') {
+          const res = await createDepositInvoice(satsToRequest, receiveMemo);
 
-          const qrData = await QRCode.toDataURL(res.invoice.toUpperCase(), {
-            margin: 2,
-            width: 280,
-            color: { dark: '#000000', light: '#FFFFFF' },
-          });
-          setQrCodeDataUrl(qrData);
+          if (res.success && res.invoice) {
+            setReceivingAddress(res.invoice);
+            setPaymentHash(res.paymentHash || '');
 
-          if (res.paymentHash) {
-            startPollingSettlement(res.paymentHash, satsToRequest);
+            const qrData = await QRCode.toDataURL(res.invoice.toUpperCase(), {
+              margin: 2,
+              width: 280,
+              color: { dark: '#000000', light: '#FFFFFF' },
+            });
+            setQrCodeDataUrl(qrData);
+
+            if (res.paymentHash) {
+              startPollingSettlement(res.paymentHash, satsToRequest);
+            }
+            return;
           }
-          return;
-        }
 
-        // If backend node is not configured or offline, fallback to user's Lightning Address or sovereign address QR
-        if (userLightningAddress) {
-          setReceivingAddress(userLightningAddress);
-          const qrData = await QRCode.toDataURL(`lightning:${userLightningAddress}`, {
+          // If backend node is not configured or offline, fallback to user's Lightning Address or sovereign address QR
+          if (userLightningAddress) {
+            setReceivingAddress(userLightningAddress);
+            const qrData = await QRCode.toDataURL(`lightning:${userLightningAddress}`, {
+              margin: 2,
+              width: 280,
+              color: { dark: '#000000', light: '#FFFFFF' },
+            });
+            setQrCodeDataUrl(qrData);
+            setReceiveError('');
+            return;
+          }
+
+          // Generate immediate fallback QR using sovereign address with BIP-21 parameter
+          setReceivingAddress(sovereignAddress);
+          const amountBtc = (satsToRequest / 100_000_000).toFixed(8);
+          const btcUri = `bitcoin:${sovereignAddress}?amount=${amountBtc}&label=Yebente%20Deposit`;
+          const qrData = await QRCode.toDataURL(btcUri, {
             margin: 2,
             width: 280,
             color: { dark: '#000000', light: '#FFFFFF' },
           });
           setQrCodeDataUrl(qrData);
-          setReceiveError('');
-          return;
+          setReceiveError('Lightning node offline in .env. Displaying sovereign Bitcoin deposit QR.');
+        } else {
+          // Layer 1 On-Chain
+          const targetAddress = sovereignAddress;
+          setReceivingAddress(targetAddress);
+          const amountBtc = (satsToRequest / 100_000_000).toFixed(8);
+          const btcUri =
+            satsToRequest > 0
+              ? `bitcoin:${targetAddress}?amount=${amountBtc}&label=Yebente%20Deposit`
+              : `bitcoin:${targetAddress}`;
+          const qrData = await QRCode.toDataURL(btcUri, {
+            margin: 2,
+            width: 280,
+            color: { dark: '#000000', light: '#FFFFFF' },
+          });
+          setQrCodeDataUrl(qrData);
         }
-
-        // Generate immediate fallback QR using sovereign address with BIP-21 parameter
-        setReceivingAddress(sovereignAddress);
-        const amountBtc = (satsToRequest / 100_000_000).toFixed(8);
-        const btcUri = `bitcoin:${sovereignAddress}?amount=${amountBtc}&label=Yebente%20Deposit`;
-        const qrData = await QRCode.toDataURL(btcUri, {
-          margin: 2,
-          width: 280,
-          color: { dark: '#000000', light: '#FFFFFF' },
-        });
-        setQrCodeDataUrl(qrData);
-        setReceiveError('Lightning node offline in .env. Displaying sovereign Bitcoin deposit QR.');
-      } else {
-        // Layer 1 On-Chain
-        const targetAddress = sovereignAddress;
-        setReceivingAddress(targetAddress);
-        const qrData = await QRCode.toDataURL(`bitcoin:${targetAddress}`, {
-          margin: 2,
-          width: 280,
-          color: { dark: '#000000', light: '#FFFFFF' },
-        });
-        setQrCodeDataUrl(qrData);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Error generating QR code.';
+        setReceiveError(message);
+      } finally {
+        setIsGenerating(false);
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Error generating QR code.';
-      setReceiveError(message);
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [rail, receiveNumericSats, receiveMemo, userLightningAddress, sovereignAddress, startPollingSettlement]);
+    },
+    [rail, receiveNumericSats, receiveMemo, userLightningAddress, sovereignAddress, startPollingSettlement]
+  );
+
+  const handleSelectReceivePreset = (preset: number) => {
+    setReceiveSatsStr(preset.toString());
+    generateReceiveQr(preset);
+  };
+
+  const handleStepReceiveSats = (delta: number) => {
+    const cur = parseInt(receiveSatsStr, 10) || 1;
+    const next = Math.max(1, cur + delta);
+    setReceiveSatsStr(next.toString());
+    generateReceiveQr(next);
+  };
 
   // Auto-generate QR code whenever receive mode or rail changes
   useEffect(() => {
@@ -256,6 +278,19 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
       generateReceiveQr();
     }
   }, [isOpen, mode, rail, generateReceiveQr]);
+
+  // Debounced auto-regeneration when typing custom sats
+  useEffect(() => {
+    if (!isOpen || mode !== 'receive') return;
+    const val = parseInt(receiveSatsStr, 10);
+    if (isNaN(val) || val < 1) return;
+
+    const timer = setTimeout(() => {
+      generateReceiveQr(val);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [receiveSatsStr, isOpen, mode, generateReceiveQr]);
 
   // Copy helpers
   const handleCopyReceivingAddress = () => {
@@ -634,6 +669,96 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                 </div>
               )}
 
+              {/* Sats Amount Configuration (Allows editing sats to the least amounts) */}
+              <div className="space-y-2 pt-0.5">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-xs font-semibold text-[#D1B9B3]">
+                    {rail === 'lightning' ? 'Invoice Amount' : 'Deposit Amount'}
+                  </label>
+                  {rates.btcKes > 0 && receiveNumericSats > 0 && (
+                    <span className="font-mono text-xs text-[#9B97A2]">
+                      {(receiveNumericSats / 100_000_000) * rates.btcKes < 0.01
+                        ? '< KES 0.01'
+                        : `≈ KES ${((receiveNumericSats / 100_000_000) * rates.btcKes).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleStepReceiveSats(-1)}
+                    disabled={receiveNumericSats <= 1 || isGenerating}
+                    className="w-10 h-10 rounded-xl bg-[#140E1B] border border-[#382B44] hover:border-[#763698] disabled:opacity-30 font-mono text-base font-bold text-[#F8F0E7] flex items-center justify-center transition-colors shrink-0"
+                    aria-label="Decrease sats"
+                  >
+                    -
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={receiveSatsStr}
+                      onChange={(e) => setReceiveSatsStr(e.target.value)}
+                      onWheel={(e) => e.currentTarget.blur()}
+                      placeholder="1"
+                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-xl px-3 py-2.5 font-mono font-bold text-sm text-[#F8F0E7] focus:outline-none focus:border-[#763698] text-center"
+                    />
+                    <span className="absolute right-3 top-3 font-mono text-xs text-[#9B97A2]">
+                      Sats
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleStepReceiveSats(1)}
+                    disabled={isGenerating}
+                    className="w-10 h-10 rounded-xl bg-[#140E1B] border border-[#382B44] hover:border-[#763698] disabled:opacity-30 font-mono text-base font-bold text-[#F8F0E7] flex items-center justify-center transition-colors shrink-0"
+                    aria-label="Increase sats"
+                  >
+                    +
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => generateReceiveQr()}
+                    disabled={isGenerating || receiveNumericSats <= 0}
+                    className="px-3 h-10 rounded-xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-semibold text-xs transition-all disabled:opacity-50 shrink-0 flex items-center justify-center"
+                  >
+                    {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Update QR'}
+                  </button>
+                </div>
+
+                {/* Quick Least Amount Presets */}
+                <div className="grid grid-cols-6 gap-1.5">
+                  {[1, 10, 100, 500, 1000, 5000].map((preset) => {
+                    const isSelected = receiveNumericSats === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => handleSelectReceivePreset(preset)}
+                        className={`py-1.5 rounded-xl border text-[11px] font-mono font-medium transition-all ${
+                          isSelected
+                            ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7] font-bold'
+                            : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
+                        }`}
+                      >
+                        {preset === 1 ? '1 Sat' : preset.toLocaleString()}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {receiveNumericSats < 1 && (
+                  <p className="text-[11px] text-amber-300 font-mono px-1">
+                    Minimum receive amount is 1 satoshi.
+                  </p>
+                )}
+              </div>
+
               {/* Auto-Generated QR Code Card */}
               <div className="flex flex-col items-center text-center space-y-3">
                 {isGenerating ? (
@@ -701,45 +826,6 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                     {copiedLnAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
                     <span>{copiedLnAddress ? 'Lightning Address Copied' : 'Copy Lightning Address'}</span>
                   </button>
-                </div>
-              )}
-
-              {/* Optional Amount Configuration for Lightning Invoices */}
-              {rail === 'lightning' && (
-                <div className="space-y-2 pt-1 border-t border-[#382B44]/40">
-                  <div className="flex justify-between items-center">
-                    <label className="text-xs font-semibold text-[#D1B9B3]">Invoice Amount</label>
-                    <span className="font-mono text-xs text-[#9B97A2]">
-                      {rates.btcKes > 0
-                        ? `≈ KES ${((receiveNumericSats / 100_000_000) * rates.btcKes).toFixed(1)}`
-                        : ''}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type="number"
-                        step="500"
-                        min="1"
-                        value={receiveSatsStr}
-                        onChange={(e) => setReceiveSatsStr(e.target.value)}
-                        onWheel={(e) => e.currentTarget.blur()}
-                        placeholder="1000"
-                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-xl px-3.5 py-2.5 font-mono font-bold text-sm text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                      />
-                      <span className="absolute right-3.5 top-3 font-mono text-xs text-[#9B97A2]">
-                        Sats
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={generateReceiveQr}
-                      disabled={isGenerating || receiveNumericSats <= 0}
-                      className="px-4 py-2.5 rounded-xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-semibold text-xs transition-all disabled:opacity-50"
-                    >
-                      Update
-                    </button>
-                  </div>
                 </div>
               )}
 
@@ -845,7 +931,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                     <div className="relative">
                       <input
                         type="number"
-                        step="500"
+                        step="1"
                         min="1"
                         value={sendSatsStr}
                         onChange={(e) => setSendSatsStr(e.target.value)}
@@ -860,8 +946,8 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                   </div>
 
                   {/* Quick Preset Buttons */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {[500, 1000, 5000, 10000].map((preset) => (
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[1, 10, 100, 500, 1000, 5000].map((preset) => (
                       <button
                         key={preset}
                         type="button"
@@ -872,7 +958,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                             : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
                         }`}
                       >
-                        {preset.toLocaleString()}
+                        {preset === 1 ? '1 Sat' : preset.toLocaleString()}
                       </button>
                     ))}
                   </div>

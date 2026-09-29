@@ -259,12 +259,12 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                     <div className="relative">
                       <input
                         type="number"
-                        step="500"
+                        step="1"
                         min="1"
                         value={satsAmountStr}
                         onChange={(e) => setSatsAmountStr(e.target.value)}
                         onWheel={(e) => e.currentTarget.blur()}
-                        placeholder="1000"
+                        placeholder="1"
                         className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                       />
                       <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
@@ -274,8 +274,8 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                   </div>
 
                   {/* Quick Preset Buttons */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {[500, 1000, 5000, 10000].map((preset) => (
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[1, 10, 100, 500, 1000, 5000].map((preset) => (
                       <button
                         key={preset}
                         type="button"
@@ -286,7 +286,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                             : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
                         }`}
                       >
-                        {preset.toLocaleString()}
+                        {preset === 1 ? '1 Sat' : preset.toLocaleString()}
                       </button>
                     ))}
                   </div>
