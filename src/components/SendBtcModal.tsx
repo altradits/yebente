@@ -26,7 +26,6 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
 }) => {
   const [recipient, setRecipient] = useState<string>('');
   const [satsAmountStr, setSatsAmountStr] = useState<string>('1000');
-  const [memo, setMemo] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [resolvedProvider, setResolvedProvider] = useState<string>('');
@@ -129,7 +128,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
 
       // 1. If recipient is a Lightning Address, generate invoice via callback
       if (recipientType === 'lightning_address' && resolvedCallback) {
-        const invRes = await createLightningInvoice(resolvedCallback, numericSats, memo || 'Ye₿ente Payout');
+        const invRes = await createLightningInvoice(resolvedCallback, numericSats, 'Ye₿ente Payout');
         if (!invRes.success || !invRes.invoice) {
           setErrorMessage(invRes.error || 'Failed to generate invoice from recipient Lightning Address.');
           setStep('error');
@@ -208,7 +207,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
       recipient: targetRecipient,
       referenceNumber: ref,
       walletType: wallet.type,
-      note: memo || `Dispatched to ${resolvedProvider || targetRecipient}`,
+      note: `Dispatched to ${resolvedProvider || targetRecipient}`,
     });
   };
 
@@ -325,20 +324,6 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                     {preset.toLocaleString()}
                   </button>
                 ))}
-              </div>
-
-              {/* Note / Memo */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Note
-                </label>
-                <input
-                  type="text"
-                  value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
-                  placeholder="e.g. Sats to Wallet of Satoshi"
-                  className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                />
               </div>
 
               {/* Fee and Total Readouts without button box */}

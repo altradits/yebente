@@ -21,7 +21,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   const [rail, setRail] = useState<'lightning' | 'onchain'>('lightning');
   const [step, setStep] = useState<'input' | 'invoice' | 'success' | 'error'>('input');
   const [satsAmountStr, setSatsAmountStr] = useState<string>('1000');
-  const [memo, setMemo] = useState<string>('Deposit from Wallet of Satoshi');
   const [isGenerating, setIsGenerating] = useState(false);
   const [invoice, setInvoice] = useState<string>('');
   const [paymentHash, setPaymentHash] = useState<string>('');
@@ -71,7 +70,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     setErrorMessage('');
 
     try {
-      const res = await createDepositInvoice(numericSats, memo);
+      const res = await createDepositInvoice(numericSats, 'Deposit from Wallet of Satoshi');
 
       if (!res.success || !res.invoice) {
         setIsNodeConfigured(Boolean(res.configured));
@@ -289,20 +288,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                         {preset === 1 ? '1 Sat' : preset.toLocaleString()}
                       </button>
                     ))}
-                  </div>
-
-                  {/* Optional Memo */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                      Note
-                    </label>
-                    <input
-                      type="text"
-                      value={memo}
-                      onChange={(e) => setMemo(e.target.value)}
-                      placeholder="Deposit from Wallet of Satoshi"
-                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                    />
                   </div>
 
                   {/* Submit CTA Button */}

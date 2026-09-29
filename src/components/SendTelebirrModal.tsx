@@ -17,7 +17,6 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
 }) => {
   const [phone, setPhone] = useState<string>('');
   const [amountStr, setAmountStr] = useState<string>('');
-  const [note, setNote] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
@@ -129,17 +128,6 @@ export const SendTelebirrModal: React.FC<SendTelebirrModalProps> = ({
               <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
                 <span>Fee</span>
                 <span>{fee} ETB</span>
-              </div>
-
-              {/* Note / Memo */}
-              <div>
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Note (optional)"
-                  className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                />
               </div>
 
               {/* Send Button */}

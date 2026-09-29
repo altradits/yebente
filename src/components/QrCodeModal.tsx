@@ -62,7 +62,6 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
   // Send state
   const [recipient, setRecipient] = useState<string>('');
   const [sendSatsStr, setSendSatsStr] = useState<string>('');
-  const [sendMemo, setSendMemo] = useState<string>('');
   const [sendStep, setSendStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [sendError, setSendError] = useState<string>('');
   const [txReference, setTxReference] = useState<string>('');
@@ -457,7 +456,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             setSendStep('error');
             return;
           }
-          const invRes = await createLightningInvoice(resolved.callbackUrl, sendNumericSats, sendMemo || 'Ye₿ente Payout');
+          const invRes = await createLightningInvoice(resolved.callbackUrl, sendNumericSats, 'Ye₿ente Payout');
           if (!invRes.success || !invRes.invoice) {
             setSendError(invRes.error || 'Failed to generate invoice from recipient Lightning Address.');
             setSendStep('error');
@@ -465,7 +464,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
           }
           finalInvoice = invRes.invoice;
         } else {
-          const invRes = await createLightningInvoice(resolvedCallback, sendNumericSats, sendMemo || 'Ye₿ente Payout');
+          const invRes = await createLightningInvoice(resolvedCallback, sendNumericSats, 'Ye₿ente Payout');
           if (!invRes.success || !invRes.invoice) {
             setSendError(invRes.error || 'Failed to generate invoice from recipient Lightning Address.');
             setSendStep('error');
@@ -503,7 +502,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             recipient: cleanRecipient,
             referenceNumber: ref,
             walletType: wallet.type,
-            note: sendMemo || `Dispatched to ${resolvedProvider || cleanRecipient}`,
+            note: `Dispatched to ${resolvedProvider || cleanRecipient}`,
           });
           return;
         }
@@ -534,7 +533,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             recipient: cleanRecipient,
             referenceNumber: ref,
             walletType: wallet.type,
-            note: sendMemo || `On-chain transfer to ${cleanRecipient}`,
+            note: `On-chain transfer to ${cleanRecipient}`,
           });
           return;
         }
@@ -975,18 +974,6 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
                         {(sendNumericSats + satsFee).toLocaleString()} Sats
                       </span>
                     </div>
-                  </div>
-
-                  {/* Optional Note */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">Note</label>
-                    <input
-                      type="text"
-                      value={sendMemo}
-                      onChange={(e) => setSendMemo(e.target.value)}
-                      placeholder="Optional memo"
-                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                    />
                   </div>
 
                   {/* Error Notification */}

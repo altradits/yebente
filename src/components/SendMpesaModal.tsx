@@ -36,7 +36,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const [paybillNumber, setPaybillNumber] = useState<string>('');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [amountStr, setAmountStr] = useState<string>('500');
-  const [note, setNote] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [realReference, setRealReference] = useState<string>('');
@@ -125,7 +124,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         amount: numericAmount,
         currency: 'KES',
         satsAmount: satsRequired,
-        note: note || 'Sats to M-Pesa Transfer',
+        note: 'Sats to M-Pesa Transfer',
       });
 
       if (!res.success) {
@@ -157,7 +156,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         recipient: getRecipientDisplay(),
         referenceNumber: refCode,
         walletType: wallet.type,
-        note: note || `Sats cashout directly to ${formatKenyanDisplayPhone(phone)} on M-Pesa`,
+        note: `Sats cashout directly to ${formatKenyanDisplayPhone(phone)} on M-Pesa`,
       });
 
       setStep('success');
@@ -385,17 +384,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                   <span>Fee</span>
                   <span>{satsFee} Sats</span>
                 </div>
-              </div>
-
-              {/* Optional Note */}
-              <div>
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Note (optional)"
-                  className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                />
               </div>
 
               {/* Submit CTA */}
