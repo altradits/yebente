@@ -94,7 +94,7 @@ export const SellBtcModal: React.FC<SellBtcModalProps> = ({
         rateUsed: currentRate,
         fee: satsFee,
         feeCurrency: 'SATS',
-        recipient: `+${phone}${destination === 'telebirr' ? ` (${recipientName || 'Recipient'})` : ''}`,
+        recipient: `+${phone}`,
         referenceNumber: refCode,
         walletType: wallet.type,
         note: `Direct payout to ${destination === 'mpesa' ? 'M-Pesa' : 'Telebirr'} mobile account`,
