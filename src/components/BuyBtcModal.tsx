@@ -1,6 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { X, ArrowDownLeft, Smartphone, CheckCircle2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle, Zap, Copy, Check, RefreshCw } from 'lucide-react';
+import {
+  initiateStkPush,
+  queryStkStatus,
+  isValidKenyanPhone,
+  formatKenyanDisplayPhone,
+  simulateSandboxStkSuccess,
+} from '../services/mpesaService';
+import {
+  isValidEthiopianPhone,
+  formatEthiopianDisplayPhone,
+  initiateTelebirrDeposit,
+} from '../services/telebirrService';
+import { isLightningAddress, resolveLightningAddress, createLightningInvoice } from '../services/lightningService';
+import { KenyaPhoneInput } from './KenyaPhoneInput';
+import { EthiopiaPhoneInput } from './EthiopiaPhoneInput';
 
 interface BuyBtcModalProps {
   isOpen: boolean;
@@ -17,139 +32,354 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   rates,
   onSuccess,
 }) => {
-  const [source, setSource] = useState<'mpesa' | 'telebirr'>('mpesa');
+  const [rail, setRail] = useState<'mpesa' | 'telebirr'>('mpesa');
   const [amountFiat, setAmountFiat] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
-  const [step, setStep] = useState<'input' | 'processing' | 'success'>('input');
-  const [destMode, setDestMode] = useState<'custodial' | 'external'>(
-    wallet.type === 'non-custodial' ? 'external' : 'custodial'
-  );
-  const [externalAddress, setExternalAddress] = useState<string>(
-    wallet.nonCustodialAddress || ''
-  );
+  const [step, setStep] = useState<'input' | 'processing' | 'awaiting_pin' | 'success' | 'error'>('input');
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [realReference, setRealReference] = useState<string>('');
+  const [activeCheckoutId, setActiveCheckoutId] = useState<string>('');
+  const [isVerifyingStatus, setIsVerifyingStatus] = useState<boolean>(false);
+  const [pinSecondsLeft, setPinSecondsLeft] = useState<number>(45);
+  const [lightningInvoice, setLightningInvoice] = useState<string>('');
+  const [copiedInvoice, setCopiedInvoice] = useState(false);
+  const isCustodialWallet = wallet.type === 'custodial';
+  const configuredDestination = isCustodialWallet
+    ? 'In-App Vault'
+    : wallet.nonCustodialAddress;
+
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
-  const currentRate = source === 'mpesa' ? rates.btcKes : rates.btcEtb;
-  const currencyCode = source === 'mpesa' ? 'KES' : 'ETB';
+  const currentRate = rail === 'mpesa' ? rates.btcKes : rates.btcEtb;
+  const currencyCode = rail === 'mpesa' ? 'KES' : 'ETB';
   const numericFiat = parseFloat(amountFiat) || 0;
   const satsAmount = currentRate > 0 ? Math.round((numericFiat / currentRate) * 100_000_000) : 0;
-  const estimatedFee = source === 'mpesa' ? 50 : 20;
+  const estimatedFee = rail === 'mpesa' ? 50 : 25;
 
-  const handleSourceChange = (newSource: 'mpesa' | 'telebirr') => {
-    setSource(newSource);
-    setPhone('');
-    setAmountFiat('');
+  const displayPhone = rail === 'mpesa'
+    ? formatKenyanDisplayPhone(phone)
+    : formatEthiopianDisplayPhone(phone);
+
+  const handleCopyInvoice = () => {
+    if (lightningInvoice) {
+      navigator.clipboard.writeText(lightningInvoice);
+      setCopiedInvoice(true);
+      setTimeout(() => setCopiedInvoice(false), 2000);
+    }
   };
 
-  const handleConfirm = () => {
-    if (numericFiat <= 0) return;
-    setStep('processing');
+  const handleManualVerify = async () => {
+    if (!activeCheckoutId || isVerifyingStatus) return;
+    setIsVerifyingStatus(true);
+    try {
+      const queryRes = await queryStkStatus(activeCheckoutId);
+      processQueryResponse(queryRes);
+    } finally {
+      setIsVerifyingStatus(false);
+    }
+  };
 
-    // Simulate mobile payment prompt response
-    setTimeout(() => {
-      const refCode =
-        source === 'mpesa'
-          ? `SAF-MP-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
-          : `ETHIO-TB-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  const handleSimulateSandboxSuccess = async () => {
+    if (!activeCheckoutId || isVerifyingStatus) return;
+    setIsVerifyingStatus(true);
+    try {
+      await simulateSandboxStkSuccess(activeCheckoutId, numericFiat, phone);
+      const queryRes = await queryStkStatus(activeCheckoutId);
+      processQueryResponse(queryRes);
+    } finally {
+      setIsVerifyingStatus(false);
+    }
+  };
+
+  const processQueryResponse = (queryRes: any) => {
+    const code = queryRes?.resultCode;
+
+    // ResultCode 0 or '0' indicates confirmed settlement by Safaricom
+    if (code === 0 || code === '0') {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      const refCode = queryRes.mpesaReceiptNumber || activeCheckoutId;
+      setRealReference(refCode);
 
       onSuccess({
         type: 'buy_btc',
-        title: `Bought Sats via ${source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}`,
+        title: 'Buy Sats via M-Pesa',
         status: 'completed',
-        fromCurrency: currencyCode,
+        fromCurrency: 'KES',
         fromAmount: numericFiat,
         toCurrency: 'SATS',
         toAmount: satsAmount,
         rateUsed: currentRate,
         fee: estimatedFee,
-        feeCurrency: currencyCode,
-        recipient: destMode === 'custodial' ? 'In-App Custodial Wallet' : externalAddress,
+        feeCurrency: 'KES',
+        recipient: isCustodialWallet ? 'In-App Custodial Wallet' : configuredDestination,
         referenceNumber: refCode,
-        walletType: destMode === 'custodial' ? 'custodial' : 'non-custodial',
-        note: `Instant STK purchase to ${destMode === 'custodial' ? 'Custodial balance' : 'Self-custody on-chain'}`,
+        walletType: wallet.type,
+        note: `Daraja STK purchase to ${configuredDestination}`,
       });
 
       setStep('success');
-    }, 2200);
+      return;
+    }
+
+    // Specific Safaricom cancellation or error codes
+    if (code !== undefined && code !== null) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+
+      if (code === 1032 || code === '1032') {
+        setErrorMessage('M-Pesa payment prompt was cancelled on your phone (M-Pesa 1032). No Sats were credited.');
+      } else if (code === 1037 || code === '1037') {
+        setErrorMessage('M-Pesa PIN prompt timed out without PIN entry (M-Pesa 1037). No Sats were credited.');
+      } else if (code === 2001 || code === '2001') {
+        setErrorMessage('Incorrect M-Pesa PIN was entered (M-Pesa 2001). No Sats were credited.');
+      } else if (code === 1 || code === '1') {
+        setErrorMessage('Insufficient M-Pesa balance on your handset (M-Pesa 1). No Sats were credited.');
+      } else {
+        setErrorMessage(queryRes.resultDesc || 'M-Pesa payment processing failed. No Sats were credited.');
+      }
+      setStep('error');
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (numericFiat <= 0) return;
+
+    if (currentRate <= 0) {
+      setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats purchase.');
+      setStep('error');
+      return;
+    }
+
+    if (rail === 'mpesa') {
+      if (!isValidKenyanPhone(phone)) {
+        setErrorMessage('Please enter a valid Safaricom number: 07XXXXXXXX or 01XXXXXXXX');
+        setStep('error');
+        return;
+      }
+
+      setStep('processing');
+      setErrorMessage('');
+
+      const res = await initiateStkPush({
+        phone,
+        amount: numericFiat,
+        accountReference: 'BuySats',
+        transactionDesc: 'Bitcoin Purchase',
+      });
+
+      if (!res.success || !res.checkoutRequestId) {
+        setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt: No CheckoutRequestID returned.');
+        setStep('error');
+        return;
+      }
+
+      const refCode = res.checkoutRequestId;
+      setActiveCheckoutId(refCode);
+      setRealReference(refCode);
+      setPinSecondsLeft(45);
+
+      if (!isCustodialWallet && isLightningAddress(configuredDestination)) {
+        try {
+          const details = await resolveLightningAddress(configuredDestination);
+          if (details.success && details.callbackUrl) {
+            const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Ye₿ente Sats Purchase');
+            if (invRes.success && invRes.invoice) {
+              setLightningInvoice(invRes.invoice);
+            }
+          }
+        } catch {
+          // Safe fallback
+        }
+      }
+
+      setStep('awaiting_pin');
+
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+
+      let remaining = 45;
+      pollIntervalRef.current = setInterval(async () => {
+        remaining -= 2;
+        setPinSecondsLeft(Math.max(0, remaining));
+
+        try {
+          const queryRes = await queryStkStatus(refCode);
+          processQueryResponse(queryRes);
+        } catch {
+          // Continue polling until timeout
+        }
+
+        if (remaining <= 0) {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
+        }
+      }, 2500);
+    } else {
+      // Telebirr ETB Deposit
+      if (!isValidEthiopianPhone(phone)) {
+        setErrorMessage('Please enter a valid Telebirr number: 09XXXXXXXX or 07XXXXXXXX');
+        setStep('error');
+        return;
+      }
+
+      setStep('processing');
+      setErrorMessage('');
+
+      try {
+        const res = await initiateTelebirrDeposit({
+          phone,
+          amount: numericFiat,
+          satsAmount,
+        });
+
+        if (!res.success) {
+          setErrorMessage(res.error || 'Failed to process Telebirr deposit.');
+          setStep('error');
+          return;
+        }
+
+        const refCode = res.referenceNumber || res.transactionId || `TB${Date.now()}`;
+        setRealReference(refCode);
+
+        onSuccess({
+          type: 'buy_btc',
+          title: 'Buy Sats via Telebirr',
+          status: 'completed',
+          fromCurrency: 'ETB',
+          fromAmount: numericFiat,
+          toCurrency: 'SATS',
+          toAmount: satsAmount,
+          rateUsed: currentRate,
+          fee: estimatedFee,
+          feeCurrency: 'ETB',
+          recipient: isCustodialWallet ? 'In-App Vault' : configuredDestination,
+          referenceNumber: refCode,
+          walletType: wallet.type,
+          note: `Telebirr deposit to ${configuredDestination}`,
+        });
+
+        setStep('success');
+      } catch (err: unknown) {
+        setErrorMessage(err instanceof Error ? err.message : 'Error processing Telebirr deposit.');
+        setStep('error');
+      }
+    }
   };
 
   const handleResetAndClose = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
     setStep('input');
+    setErrorMessage('');
+    setLightningInvoice('');
+    setActiveCheckoutId('');
+    setCopiedInvoice(false);
     onClose();
   };
+
+  const handleBack = () => {
+    if (step === 'awaiting_pin' || step === 'error' || step === 'success') {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setStep('input');
+      setErrorMessage('');
+      return;
+    }
+    handleResetAndClose();
+  };
+
+  const isFormValid =
+    numericFiat > 0 &&
+    currentRate > 0 &&
+    (rail === 'mpesa' ? isValidKenyanPhone(phone) : isValidEthiopianPhone(phone));
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
-              <ArrowDownLeft className="w-4 h-4 text-[#F8F0E7]" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-[#F8F0E7]">Buy Sats</h2>
-            </div>
-          </div>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#382B44]/60">
           <button
-            onClick={handleResetAndClose}
-            className="w-8 h-8 rounded-xl bg-[#251B30] text-[#9B97A2] hover:text-[#F8F0E7] flex items-center justify-center transition-colors"
+            type="button"
+            onClick={handleBack}
+            className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+            aria-label="Back"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <h2 className="text-base font-bold text-[#F8F0E7]">Buy Sats</h2>
+          <div className="w-8" aria-hidden="true" />
         </div>
 
-        {/* Content body */}
+        {/* Content */}
         <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <>
-              {/* Payment Method Selector */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-2">
-                  Payment Source
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSourceChange('mpesa')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-medium transition-all ${
-                      source === 'mpesa'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7] shadow-sm shadow-[#763698]/20'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
-                  >
-                    M-Pesa (Kenya KES)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSourceChange('telebirr')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-2xl border text-xs font-medium transition-all ${
-                      source === 'telebirr'
-                        ? 'border-[#946069] bg-[#946069]/20 text-[#F8F0E7] shadow-sm shadow-[#946069]/20'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2] hover:border-[#554653]'
-                    }`}
-                  >
-                    Telebirr (Ethiopia ETB)
-                  </button>
-                </div>
+              {/* Mobile Network Tab Selector */}
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select mobile network">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRail('mpesa');
+                    setPhone('');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    rail === 'mpesa'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  M-Pesa (KES)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRail('telebirr');
+                    setPhone('');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    rail === 'telebirr'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Telebirr (ETB)
+                </button>
               </div>
 
-              {/* Amount Inputs */}
+              {/* Amount to spend */}
               <div>
-                <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
-                  <span className="font-semibold">You Pay</span>
-                  <span className="font-mono text-[#9B97A2]">
-                    Avail: {source === 'mpesa' ? `${wallet.mpesaBalanceKes.toLocaleString()} KES` : `${wallet.telebirrBalanceEtb.toLocaleString()} ETB`}
-                  </span>
-                </div>
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                  Amount ({currencyCode})
+                </label>
                 <div className="relative">
                   <input
                     type="number"
                     value={amountFiat}
                     onChange={(e) => setAmountFiat(e.target.value)}
                     onWheel={(e) => e.currentTarget.blur()}
-                    placeholder="Enter amount"
+                    placeholder="0"
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
                   <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
@@ -158,103 +388,45 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 </div>
               </div>
 
-              {/* You Receive Calculation */}
-              <div className="bg-[#140E1B]/90 border border-[#382B44] rounded-2xl p-3.5">
-                <div className="flex justify-between items-center text-xs text-[#9B97A2] mb-1">
-                  <span>You Receive</span>
-                  <span className="text-[11px] font-mono text-[#D1B9B3]">
-                    100,000 Sats = {Math.round(currentRate * 0.001).toLocaleString()} {currencyCode}
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold font-mono text-[#D1B9B3] tabular-nums">
-                    {satsAmount.toLocaleString()}
-                  </span>
-                  <span className="text-sm font-bold text-[#F8F0E7] font-mono">Sats</span>
-                </div>
+              {/* Sats preview */}
+              <div className="flex justify-between items-center px-1 text-xs">
+                <span className="text-[#9B97A2]">You Receive</span>
+                <span className="font-mono font-bold text-[#F8F0E7]">
+                  +{satsAmount.toLocaleString()} Sats
+                </span>
               </div>
 
-              {/* Destination Wallet Preference (Custodial or Non-Custodial) */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Deposit Destination
-                </label>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setDestMode('custodial')}
-                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
-                      destMode === 'custodial'
-                        ? 'border-[#763698] bg-[#763698]/20 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    Custodial (In-App)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDestMode('external')}
-                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
-                      destMode === 'external'
-                        ? 'border-[#D1B9B3] bg-[#D1B9B3]/15 text-[#F8F0E7]'
-                        : 'border-[#382B44] bg-[#140E1B] text-[#9B97A2]'
-                    }`}
-                  >
-                    Non-Custodial (Self)
-                  </button>
-                </div>
+              {/* Phone input component */}
+              {rail === 'mpesa' ? (
+                <KenyaPhoneInput
+                  value={phone}
+                  onChange={(full) => setPhone(full)}
+                  label="M-Pesa Phone Number"
+                  ariaLabel="M-Pesa phone number"
+                />
+              ) : (
+                <EthiopiaPhoneInput
+                  value={phone}
+                  onChange={(full) => setPhone(full)}
+                  label="Telebirr Phone Number"
+                  ariaLabel="Telebirr phone number"
+                />
+              )}
 
-                {destMode === 'external' && (
-                  <div className="mt-2">
-                    <input
-                      type="text"
-                      value={externalAddress}
-                      onChange={(e) => setExternalAddress(e.target.value)}
-                      placeholder="Bitcoin address (e.g. bc1q...)"
-                      className="w-full bg-[#140E1B] border border-[#382B44] rounded-xl px-3 py-2 text-xs font-mono text-[#D1B9B3] focus:outline-none focus:border-[#763698]"
-                    />
-                  </div>
-                )}
+              {/* Network fee summary */}
+              <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
+                <span>Fee</span>
+                <span>{estimatedFee} {currencyCode}</span>
               </div>
 
-              {/* Mobile Phone for prompt */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  {source === 'mpesa' ? 'M-Pesa Phone Number' : 'Telebirr Phone Number'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    onWheel={(e) => e.currentTarget.blur()}
-                    placeholder={source === 'mpesa' ? '2547XXXXXXXX' : '2519XXXXXXXX'}
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                  <Smartphone className="w-4 h-4 text-[#9B97A2] absolute right-3.5 top-3" />
-                </div>
-              </div>
-
-              {/* Fees summary */}
-              <div className="text-xs text-[#9B97A2] space-y-1 pt-1 font-mono">
-                <div className="flex justify-between">
-                  <span>Network / Carrier Fee</span>
-                  <span>{estimatedFee} {currencyCode}</span>
-                </div>
-                <div className="flex justify-between font-bold text-[#F8F0E7] pt-1.5 border-t border-[#382B44]">
-                  <span>Total Debit</span>
-                  <span className="text-[#D1B9B3]">{(numericFiat + estimatedFee).toLocaleString()} {currencyCode}</span>
-                </div>
-              </div>
-
-              {/* Submit CTA */}
+              {/* Action button */}
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericFiat <= 0}
-                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#763698]/25"
+                disabled={!isFormValid}
+                className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#763698]/20"
               >
-                Proceed with {source === 'mpesa' ? 'M-Pesa' : 'Telebirr'}
+                {currentRate <= 0 ? 'Rates Unavailable' : 'Buy Sats'}
               </button>
             </>
           )}
@@ -266,8 +438,83 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-bold text-[#F8F0E7]">
-                  {source === 'mpesa' ? 'M-Pesa STK Prompt Sent' : 'Telebirr Request Sent'}
+                  {rail === 'mpesa' ? 'Dispatching M-Pesa Prompt' : 'Processing Telebirr Deposit'}
                 </h3>
+                <p className="text-xs text-[#9B97A2] font-mono mt-1">
+                  {rail === 'mpesa' ? 'Connecting to Safaricom Daraja...' : 'Connecting to Ethio Telecom Telebirr...'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {step === 'awaiting_pin' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-full bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
+                  <Smartphone className="w-8 h-8 animate-pulse text-[#F8F0E7]" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#2A1E37] border border-[#763698] flex items-center justify-center">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D1B9B3]" />
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Enter M-Pesa PIN on Phone</h3>
+                <p className="text-xs text-[#D1B9B3] mt-1 max-w-xs">
+                  Safaricom has dispatched a payment prompt to <span className="font-mono font-bold text-[#F8F0E7]">{formatKenyanDisplayPhone(phone)}</span>.
+                </p>
+                <p className="text-[11px] text-[#9B97A2] mt-0.5">
+                  Check your phone screen and enter your PIN to authorize payment.
+                </p>
+              </div>
+
+              <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Amount</span>
+                  <span className="text-[#F8F0E7] font-bold">{numericFiat.toLocaleString()} KES</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Sats to Receive</span>
+                  <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Checkout Request ID</span>
+                  <span className="text-[#9B97A2] text-[10px] truncate max-w-[170px]">{activeCheckoutId}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
+                  <span className="text-[#9B97A2]">Verification Window</span>
+                  <span className="text-amber-400 font-bold">{pinSecondsLeft}s</span>
+                </div>
+              </div>
+
+              <div className="w-full flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleManualVerify}
+                  disabled={isVerifyingStatus}
+                  className="flex-1 h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingStatus ? 'animate-spin' : ''}`} />
+                  <span>{isVerifyingStatus ? 'Checking...' : 'Check Status Now'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSimulateSandboxSuccess}
+                  disabled={isVerifyingStatus}
+                  className="h-11 px-3.5 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-all disabled:opacity-50"
+                  title="Simulate Sandbox PIN Confirmation"
+                >
+                  Simulate Payment
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetAndClose}
+                  className="h-11 px-4 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#9B97A2] hover:text-[#F8F0E7] font-medium text-xs transition-all"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           )}
@@ -275,10 +522,13 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
           {step === 'success' && (
             <div className="py-6 flex flex-col items-center text-center space-y-4">
               <div className="w-14 h-14 rounded-full bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
-                <CheckCircle2 className="w-8 h-8" />
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Sats Purchase Successful</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Payment Verified & Sats Credited</h3>
+                <p className="text-xs text-emerald-400 font-mono mt-0.5">
+                  {rail === 'mpesa' ? 'Safaricom confirmed settlement successfully' : 'Telebirr confirmed settlement successfully'}
+                </p>
               </div>
 
               <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
@@ -287,16 +537,60 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                   <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Credited To</span>
+                  <span className="text-emerald-400 font-semibold">Ye₿ente Portfolio (+{satsAmount.toLocaleString()} Sats)</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Paid Amount</span>
                   <span className="text-[#F8F0E7]">{numericFiat.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Phone Number</span>
+                  <span className="text-[#D1B9B3] font-mono">{displayPhone}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Destination</span>
                   <span className="text-[#D1B9B3] truncate max-w-[180px]">
-                    {destMode === 'custodial' ? 'In-App Custodial' : externalAddress}
+                    {configuredDestination}
                   </span>
                 </div>
+                {realReference && (
+                  <div className="flex justify-between">
+                    <span className="text-[#9B97A2]">{rail === 'mpesa' ? 'Safaricom Reference' : 'Telebirr Reference'}</span>
+                    <span className="text-[#D1B9B3] font-mono text-[10px] truncate max-w-[180px]">{realReference}</span>
+                  </div>
+                )}
               </div>
+
+              {lightningInvoice ? (
+                <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3 space-y-2 text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs text-[#D1B9B3] font-semibold">
+                      <Zap className="w-3.5 h-3.5 text-[#D1B9B3]" />
+                      <span>Wallet of Satoshi Invoice</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyInvoice}
+                      className="px-2 py-1 rounded-lg bg-[#231A2D] border border-[#3C2E49] text-[11px] font-mono text-[#9B97A2] hover:text-[#F8F0E7] flex items-center gap-1 transition-colors"
+                    >
+                      {copiedInvoice ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedInvoice ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <p className="font-mono text-[10px] text-[#9B97A2] break-all select-all bg-[#0E0A13] p-2 rounded-xl border border-[#2B2135]">
+                    {lightningInvoice}
+                  </p>
+                  <p className="text-[10px] text-[#9B97A2] leading-relaxed">
+                    Sats have been credited to your Ye₿ente vault balance. Automated node settlement requires configuring LNBITS_URL or LND_REST_URL in .env.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-emerald-300 text-xs w-full text-left">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{satsAmount.toLocaleString()} Sats added to your Ye₿ente balance.</span>
+                </div>
+              )}
 
               <button
                 type="button"
@@ -304,6 +598,26 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 className="w-full h-11 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#F8F0E7] font-medium text-sm transition-all"
               >
                 Done
+              </button>
+            </div>
+          )}
+
+          {step === 'error' && (
+            <div className="py-6 flex flex-col items-center text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-[#946069]/20 border border-[#946069]/40 flex items-center justify-center text-[#946069]">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Transaction Incomplete</h3>
+                <p className="text-xs text-[#9B97A2] font-mono mt-1 px-4">{errorMessage}</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStep('input')}
+                className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-medium text-sm transition-all"
+              >
+                Retry
               </button>
             </div>
           )}

@@ -1,3 +1,5 @@
+import { isLightningAddress, resolveLightningAddress } from './lightningService';
+
 export interface AddressBalanceResult {
   sats: number;
   btc: number;
@@ -5,28 +7,47 @@ export interface AddressBalanceResult {
   unconfirmedSats: number;
   txCount: number;
   success: boolean;
+  isLightning?: boolean;
+  lightningProvider?: string;
+  lightningAddress?: string;
+  minSendableSats?: number;
+  maxSendableSats?: number;
+  callbackUrl?: string;
   error?: string;
 }
 
 /**
- * Validates basic Bitcoin address structure (Legacy 1..., P2SH 3..., Native SegWit bc1q..., Taproot bc1p...)
+ * Strips URI schemes (bitcoin:, lightning:) and query parameters (?amount=...)
+ */
+export function sanitizeBitcoinAddress(input: string): string {
+  let clean = input.trim();
+  clean = clean.replace(/^(bitcoin|lightning):/i, '');
+  if (clean.includes('?')) {
+    clean = clean.split('?')[0];
+  }
+  return clean.trim();
+}
+
+/**
+ * Validates basic Bitcoin address structure or Lightning Address (user@domain)
  */
 export function isValidBitcoinAddress(address: string): boolean {
-  const clean = address.trim();
+  const clean = sanitizeBitcoinAddress(address);
   if (!clean) return false;
+  if (isLightningAddress(clean)) return true;
   // Standard mainnet regex for legacy, p2sh, segwit, taproot
   const btcRegex = /^(bc1[a-z0-9]{25,90}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/i;
   return btcRegex.test(clean);
 }
 
 /**
- * Fetches real on-chain satoshi balance directly from the Bitcoin blockchain via mempool.space,
- * falling back to blockstream.info.
+ * Fetches real on-chain satoshi balance from Bitcoin nodes,
+ * or resolves Lightning Addresses (such as Wallet of Satoshi) via LNURL.
  */
 export async function fetchBitcoinAddressBalance(
   address: string
 ): Promise<AddressBalanceResult> {
-  const clean = address.trim();
+  const clean = sanitizeBitcoinAddress(address);
   if (!clean) {
     return {
       sats: 0,
@@ -39,12 +60,42 @@ export async function fetchBitcoinAddressBalance(
     };
   }
 
-  // 1. Try mempool.space API
+  // 1. Check if this is a Layer 2 Lightning Address (e.g. user@walletofsatoshi.com)
+  if (isLightningAddress(clean)) {
+    const lnDetails = await resolveLightningAddress(clean);
+    if (!lnDetails.success) {
+      return {
+        sats: 0,
+        btc: 0,
+        confirmedSats: 0,
+        unconfirmedSats: 0,
+        txCount: 0,
+        success: false,
+        error: lnDetails.error || 'Failed to resolve Lightning Address.',
+      };
+    }
+    return {
+      sats: 0,
+      btc: 0,
+      confirmedSats: 0,
+      unconfirmedSats: 0,
+      txCount: 0,
+      success: true,
+      isLightning: true,
+      lightningProvider: lnDetails.provider,
+      lightningAddress: lnDetails.address,
+      minSendableSats: lnDetails.minSendableSats,
+      maxSendableSats: lnDetails.maxSendableSats,
+      callbackUrl: lnDetails.callbackUrl,
+    };
+  }
+
+  // 2. Query Blockstream API (fastest, high reliability)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`https://mempool.space/api/address/${clean}`, {
+    const res = await fetch(`https://blockstream.info/api/address/${clean}`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -77,12 +128,40 @@ export async function fetchBitcoinAddressBalance(
     // try fallback
   }
 
-  // 2. Try blockstream.info API fallback
+  // 3. Query Blockchain.info rawaddr API (secondary high-availability fallback)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`https://blockstream.info/api/address/${clean}`, {
+    const res = await fetch(`https://blockchain.info/rawaddr/${clean}?limit=0`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      const finalSats = Math.max(0, Number(data.final_balance) || 0);
+      const txCount = Number(data.n_tx) || 0;
+
+      return {
+        sats: finalSats,
+        btc: finalSats / 100_000_000,
+        confirmedSats: finalSats,
+        unconfirmedSats: 0,
+        txCount,
+        success: true,
+      };
+    }
+  } catch {
+    // try tertiary fallback
+  }
+
+  // 4. Query Mempool.space API (tertiary fallback with short timeout)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(`https://mempool.space/api/address/${clean}`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -112,9 +191,10 @@ export async function fetchBitcoinAddressBalance(
       };
     }
   } catch {
-    // Both failed or offline
+    // All nodes failed
   }
 
+  const isSyntacticallyValid = isValidBitcoinAddress(clean);
   return {
     sats: 0,
     btc: 0,
@@ -122,6 +202,8 @@ export async function fetchBitcoinAddressBalance(
     unconfirmedSats: 0,
     txCount: 0,
     success: false,
-    error: 'Could not reach Bitcoin blockchain node. Check network or address.',
+    error: isSyntacticallyValid
+      ? 'Bitcoin blockchain nodes are unreachable. Check internet connection.'
+      : 'Invalid Bitcoin or Lightning Address format. Check address.',
   };
 }

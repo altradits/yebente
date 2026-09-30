@@ -1,0 +1,167 @@
+{
+  "info": {
+    "name": "Yebente M-Pesa Daraja API",
+    "description": "Comprehensive M-Pesa Daraja integration endpoints for STK Push, Query, B2C/C2B Hakikisha, B2C Payout, and Webhook Callbacks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "phone",
+      "value": "0708374149",
+      "type": "string"
+    },
+    {
+      "key": "amount",
+      "value": "10",
+      "type": "string"
+    },
+    {
+      "key": "checkoutRequestId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Configuration Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "health"]
+        },
+        "description": "Checks if the Daraja backend bridge is active and OAuth credentials are loaded."
+      }
+    },
+    {
+      "name": "2. Hakikisha B2C - Subscriber Name Verification",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"{{phone}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mpesa/hakikisha/b2c",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mpesa", "hakikisha", "b2c"]
+        },
+        "description": "Queries Safaricom Hakikisha B2C to resolve the legal subscriber name before initiating payment."
+      }
+    },
+    {
+      "name": "3. Hakikisha C2B - Till / Paybill Merchant Verification",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shortCode\": \"174379\",\n  \"accountNumber\": \"TESTACC\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mpesa/hakikisha/c2b",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mpesa", "hakikisha", "c2b"]
+        },
+        "description": "Queries Safaricom Hakikisha C2B to resolve merchant organization name."
+      }
+    },
+    {
+      "name": "4. STK Push - Lipa Na M-Pesa Online",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"{{phone}}\",\n  \"amount\": {{amount}},\n  \"accountReference\": \"YebentePay\",\n  \"transactionDesc\": \"Bitcoin Settlement\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mpesa/stkpush",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mpesa", "stkpush"]
+        },
+        "description": "Dispatches Lipa Na M-Pesa Online STK prompt to customer mobile device. Returns checkoutRequestId."
+      }
+    },
+    {
+      "name": "5. Query STK Push Status",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"checkoutRequestId\": \"{{checkoutRequestId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mpesa/query",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mpesa", "query"]
+        },
+        "description": "Queries Safaricom to verify if the STK PIN was entered, cancelled, or timed out."
+      }
+    },
+    {
+      "name": "6. B2C Payout - Disburse Sats/KES to Phone",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"{{phone}}\",\n  \"amount\": {{amount}},\n  \"currency\": \"KES\",\n  \"satsAmount\": 1500,\n  \"recipientName\": \"Test Recipient\",\n  \"note\": \"Bitcoin Payout\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mpesa/payout",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mpesa", "payout"]
+        },
+        "description": "Disburses funds to recipient phone number using Safaricom B2C API."
+      }
+    },
+    {
+      "name": "7. Inspect Received Webhook Callbacks",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/mpesa/callbacks",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mpesa", "callbacks"]
+        },
+        "description": "Lists all recent asynchronous webhook callbacks received by the bridge."
+      }
+    }
+  ]
+}

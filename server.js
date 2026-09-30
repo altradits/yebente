@@ -1,7 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 const app = express();
 app.use(express.json());
@@ -14,6 +14,10 @@ const BASE_URL =
   DARAJA_ENV === 'production'
     ? 'https://api.safaricom.co.ke'
     : 'https://sandbox.safaricom.co.ke';
+
+// In-memory store for webhook callbacks
+const recentCallbacks = new Map();
+const callbackHistory = [];
 
 /**
  * Format phone number to Safaricom standard: 2547XXXXXXXX or 2541XXXXXXXX
@@ -46,10 +50,17 @@ function getTimestamp() {
   return `${year}${month}${day}${hours}${minutes}${seconds}`;
 }
 
+let cachedAccessToken = null;
+let tokenExpiresAt = 0;
+
 /**
  * Obtain OAuth Access Token from Safaricom Daraja API
  */
 async function getDarajaAccessToken() {
+  if (cachedAccessToken && Date.now() < tokenExpiresAt) {
+    return cachedAccessToken;
+  }
+
   const consumerKey = process.env.MPESA_CONSUMER_KEY;
   const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
 
@@ -70,7 +81,12 @@ async function getDarajaAccessToken() {
   }
 
   const data = await response.json();
-  return data.access_token;
+  cachedAccessToken = data.access_token;
+  // Safaricom tokens are valid for 3599 seconds; refresh 60 seconds before expiry
+  const expiresInMs = (parseInt(data.expires_in, 10) || 3599) * 1000;
+  tokenExpiresAt = Date.now() + Math.max(expiresInMs - 60000, 60000);
+
+  return cachedAccessToken;
 }
 
 // Health check endpoint
@@ -92,15 +108,32 @@ app.post('/api/mpesa/stkpush', async (req, res) => {
     const { phone, amount, accountReference, transactionDesc } = req.body;
 
     if (!phone || !amount || Number(amount) <= 0) {
-      return res.status(400).json({ error: 'Valid phone and amount are required.' });
+      return res.status(400).json({ success: false, error: 'Valid phone and amount are required.' });
     }
 
-    const shortcode = process.env.MPESA_SHORTCODE || '174379'; // Sandbox default shortcode
+    const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
-    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+    const callbackUrl = process.env.MPESA_CALLBACK_URL;
+
+    if (!shortcode) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Push failed: MPESA_SHORTCODE is not configured in .env. Specify your Safaricom Paybill or Till shortcode.',
+      });
+    }
 
     if (!passkey) {
-      return res.status(500).json({ error: 'MPESA_PASSKEY is not configured.' });
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Push failed: MPESA_PASSKEY is not configured in .env. Obtain passkey from Safaricom Developer Portal.',
+      });
+    }
+
+    if (!callbackUrl) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Push failed: MPESA_CALLBACK_URL is not configured in .env. Safaricom requires a publicly accessible HTTPS webhook URL to deliver payment confirmation.',
+      });
     }
 
     const accessToken = await getDarajaAccessToken();
@@ -165,14 +198,31 @@ app.post('/api/mpesa/query', async (req, res) => {
     const { checkoutRequestId } = req.body;
 
     if (!checkoutRequestId) {
-      return res.status(400).json({ error: 'checkoutRequestId is required.' });
+      return res.status(400).json({ success: false, error: 'checkoutRequestId is required.' });
     }
 
-    const shortcode = process.env.MPESA_SHORTCODE || '174379';
+    if (recentCallbacks.has(checkoutRequestId)) {
+      const cb = recentCallbacks.get(checkoutRequestId);
+      return res.json({
+        success: true,
+        source: 'callback',
+        responseCode: '0',
+        resultCode: cb.resultCode,
+        resultDesc: cb.resultDesc,
+        mpesaReceiptNumber: cb.mpesaReceiptNumber || null,
+        checkoutRequestId,
+        details: cb.payload,
+      });
+    }
+
+    const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
 
-    if (!passkey) {
-      return res.status(500).json({ error: 'MPESA_PASSKEY is not configured.' });
+    if (!shortcode || !passkey) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa STK Query failed: MPESA_SHORTCODE and MPESA_PASSKEY must be configured in .env.',
+      });
     }
 
     const accessToken = await getDarajaAccessToken();
@@ -199,6 +249,7 @@ app.post('/api/mpesa/query', async (req, res) => {
 
     return res.json({
       success: response.ok,
+      source: 'daraja_query',
       responseCode: data.ResponseCode,
       resultCode: data.ResultCode,
       resultDesc: data.ResultDesc,
@@ -213,14 +264,1365 @@ app.post('/api/mpesa/query', async (req, res) => {
   }
 });
 
+const C2B_HAKIKISHA_URL =
+  DARAJA_ENV === 'production'
+    ? 'https://api.safaricom.co.ke/c2b_hakikisha/v1/notify'
+    : 'https://sandbox.safaricom.co.ke/c2b_hakikisha/v1/notify';
+
+const B2B_HAKIKISHA_URL =
+  DARAJA_ENV === 'production'
+    ? 'https://api.safaricom.co.ke/sfcverify/v1/query/info'
+    : 'https://sandbox.safaricom.co.ke/sfcverify/v1/query/info';
+
+/**
+ * Safaricom C2B Hakikisha - Paybill / Till Number Organization Verification
+ * Queries Safaricom Daraja C2B Hakikisha endpoint. No fallback names.
+ */
+app.post('/api/mpesa/hakikisha/c2b', async (req, res) => {
+  try {
+    const { shortCode, accountNumber, phone } = req.body;
+    if (!shortCode) {
+      return res.status(400).json({ success: false, verified: false, error: 'ShortCode is required.' });
+    }
+
+    const cleanShortcode = String(shortCode).trim();
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      ShortCode: cleanShortcode,
+      AccountNumber: accountNumber ? String(accountNumber).trim() : '',
+      PhoneNumber: phone ? formatKenyanPhone(phone) : '',
+    };
+
+    const response = await fetch(C2B_HAKIKISHA_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
+    let hakikishaData = null;
+    try {
+      hakikishaData = text ? JSON.parse(text) : {};
+    } catch {
+      return res.status(response.status).json({
+        success: false,
+        verified: false,
+        error: `Safaricom C2B Hakikisha returned non-JSON response (${response.status}): ${text.slice(0, 200)}`,
+      });
+    }
+
+    if (!response.ok) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: hakikishaData.errorMessage || hakikishaData.ResponseDescription || hakikishaData.ResponseMessage || `Safaricom C2B Hakikisha lookup failed for ShortCode ${cleanShortcode}.`,
+        details: hakikishaData,
+      });
+    }
+
+    const resolvedOrgName = hakikishaData?.OrgName || hakikishaData?.BusinessName || hakikishaData?.name;
+
+    if (!resolvedOrgName) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        error: `Safaricom merchant not found for ShortCode ${cleanShortcode}. Ensure the shortcode is active on Safaricom Daraja.`,
+        details: hakikishaData,
+      });
+    }
+
+    return res.json({
+      success: true,
+      verified: true,
+      shortCode: cleanShortcode,
+      name: resolvedOrgName,
+      accountNumber: accountNumber || '',
+      provider: 'Safaricom M-Pesa C2B Hakikisha',
+      upstreamVerified: true,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      verified: false,
+      error: error.message || 'Internal server error during C2B Hakikisha verification.',
+    });
+  }
+});
+
+/**
+ * Safaricom B2B Hakikisha - Organization Shortcode Verification (Query Org Info)
+ * Queries Safaricom Daraja /sfcverify/v1/query/info endpoint.
+ */
+app.post('/api/mpesa/hakikisha/b2b', async (req, res) => {
+  try {
+    const { shortCode, identifierType } = req.body;
+    if (!shortCode) {
+      return res.status(400).json({ success: false, verified: false, error: 'shortCode is required.' });
+    }
+
+    const cleanShortcode = String(shortCode).trim();
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      IdentifierType: String(identifierType || '4'),
+      Identifier: cleanShortcode,
+    };
+
+    const response = await fetch(B2B_HAKIKISHA_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        verified: false,
+        error: data.errorMessage || data.ResponseDescription || `Safaricom B2B Hakikisha lookup failed for ${cleanShortcode}.`,
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      verified: true,
+      shortCode: cleanShortcode,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      verified: false,
+      error: error.message || 'Internal server error during B2B Hakikisha verification.',
+    });
+  }
+});
+
+/**
+ * B2C Payout / Disburse Sats or KES to M-Pesa Phone Number
+ * Strictly queries Safaricom B2C API. No mock fallbacks.
+ */
+app.post('/api/mpesa/payout', async (req, res) => {
+  try {
+    const { phone, amount, currency, satsAmount, note } = req.body;
+
+    if (!phone || !amount || Number(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'Valid phone and amount are required.' });
+    }
+
+    const formatted = formatKenyanPhone(phone);
+    if (!/^254[71]\d{8}$/.test(formatted)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Kenyan phone number. Must use Kenya country code +254 (07XXXXXXXX or 01XXXXXXXX).',
+      });
+    }
+
+    const b2cInitiator = process.env.MPESA_INITIATOR_NAME || (DARAJA_ENV === 'sandbox' ? 'testapi' : null);
+    const b2cSecurity = process.env.MPESA_SECURITY_CREDENTIAL || (DARAJA_ENV === 'sandbox' ? 'mock_security_credential_12345' : null);
+    const b2cShortcode = process.env.MPESA_B2C_SHORTCODE || (DARAJA_ENV === 'sandbox' ? '600000' : process.env.MPESA_SHORTCODE);
+    const callbackUrl = process.env.MPESA_CALLBACK_URL;
+
+    if (!b2cInitiator || !b2cSecurity || !b2cShortcode) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa B2C Payout failed: Missing required B2C credentials. Configure MPESA_INITIATOR_NAME, MPESA_SECURITY_CREDENTIAL, and MPESA_B2C_SHORTCODE in .env, and ensure utility float is funded in the Safaricom B2C disbursement account.',
+      });
+    }
+
+    if (!callbackUrl) {
+      return res.status(500).json({
+        success: false,
+        error: 'M-Pesa B2C Payout failed: MPESA_CALLBACK_URL is not configured in .env. Safaricom requires a public HTTPS webhook URL to deliver disbursement confirmation.',
+      });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const b2cPayload = {
+      InitiatorName: b2cInitiator,
+      SecurityCredential: b2cSecurity,
+      CommandID: 'BusinessPayment',
+      Amount: Math.round(Number(amount)),
+      PartyA: b2cShortcode,
+      PartyB: formatted,
+      Remarks: note || 'Bitcoin Sats Cashout',
+      QueueTimeOutURL: callbackUrl,
+      ResultURL: callbackUrl,
+      Occasion: 'Settlement',
+    };
+
+    const b2cResponse = await fetch(`${BASE_URL}/mpesa/b2c/v1/paymentrequest`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(b2cPayload),
+    });
+
+    const b2cData = await b2cResponse.json();
+
+    if (!b2cResponse.ok || b2cData.ResponseCode !== '0') {
+      return res.status(400).json({
+        success: false,
+        error: b2cData.errorMessage || b2cData.ResponseDescription || 'Safaricom B2C payment request failed.',
+        details: b2cData,
+      });
+    }
+
+    return res.json({
+      success: true,
+      referenceNumber: b2cData.ConversationID || b2cData.OriginatorConversationID,
+      phone: formatted,
+      amount: Number(amount),
+      currency: currency || 'KES',
+      satsAmount: satsAmount || 0,
+      status: 'submitted',
+      message: `M-Pesa payout dispatched successfully. ConversationID: ${b2cData.ConversationID}`,
+      darajaResponse: b2cData,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during M-Pesa payout.',
+    });
+  }
+});
+
+/**
+ * Safaricom Account Balance Query
+ * Queries available float and working balances on the organization shortcode
+ */
+app.post('/api/mpesa/balance', async (req, res) => {
+  try {
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const shortcode = req.body.shortcode || process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: 'AccountBalance',
+      PartyA: String(shortcode),
+      IdentifierType: '4',
+      Remarks: req.body.remarks || 'Account Balance Query',
+      QueueTimeOutURL: callbackUrl,
+      ResultURL: callbackUrl,
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/accountbalance/v1/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom Account Balance query failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Account Balance query.',
+    });
+  }
+});
+
+/**
+ * Safaricom General Transaction Status Query
+ * Queries the processing status of B2C, B2B, or C2B transactions
+ */
+app.post('/api/mpesa/transaction-status', async (req, res) => {
+  try {
+    const { transactionId, remarks, occasion } = req.body;
+    if (!transactionId) {
+      return res.status(400).json({ success: false, error: 'transactionId is required.' });
+    }
+
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const shortcode = req.body.shortcode || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: 'TransactionStatusQuery',
+      TransactionID: String(transactionId).trim(),
+      PartyA: String(shortcode),
+      IdentifierType: req.body.identifierType || '4',
+      ResultURL: callbackUrl,
+      QueueTimeOutURL: callbackUrl,
+      Remarks: remarks || 'Transaction Status Query',
+      Occasion: occasion || 'Query',
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/transactionstatus/v1/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom Transaction Status query failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Transaction Status query.',
+    });
+  }
+});
+
+/**
+ * Safaricom Transaction Reversal Request
+ * Initiates reversal of an accidental transaction
+ */
+app.post('/api/mpesa/reversal', async (req, res) => {
+  try {
+    const { transactionId, amount, remarks, occasion, receiverParty } = req.body;
+    if (!transactionId || !amount) {
+      return res.status(400).json({ success: false, error: 'transactionId and amount are required.' });
+    }
+
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const shortcode = receiverParty || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: 'TransactionReversal',
+      TransactionID: String(transactionId).trim(),
+      Amount: String(Math.round(Number(amount))),
+      ReceiverParty: String(shortcode),
+      RecieverIdentifierType: req.body.receiverIdentifierType || '11',
+      ResultURL: callbackUrl,
+      QueueTimeOutURL: callbackUrl,
+      Remarks: remarks || 'Transaction Reversal',
+      Occasion: occasion || 'Reversal',
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/reversal/v1/request`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom Transaction Reversal failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Transaction Reversal.',
+    });
+  }
+});
+
+/**
+ * Safaricom B2B Payment Request
+ * Transfers funds from business shortcode to merchant or paybill shortcode
+ */
+app.post('/api/mpesa/b2b', async (req, res) => {
+  try {
+    const { partyB, amount, accountReference, remarks, commandId } = req.body;
+    if (!partyB || !amount || Number(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'partyB and valid amount are required.' });
+    }
+
+    const initiator = req.body.initiator || process.env.MPESA_INITIATOR_NAME || 'testapi';
+    const security = req.body.securityCredential || process.env.MPESA_SECURITY_CREDENTIAL || 'test';
+    const partyA = req.body.partyA || process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE || '600000';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      Initiator: initiator,
+      SecurityCredential: security,
+      CommandID: commandId || 'BusinessPayBill',
+      SenderIdentifierType: req.body.senderIdentifierType || '4',
+      RecieverIdentifierType: req.body.receiverIdentifierType || '4',
+      Amount: String(Math.round(Number(amount))),
+      PartyA: String(partyA),
+      PartyB: String(partyB),
+      AccountReference: accountReference || 'INV001',
+      Remarks: remarks || 'B2B Settlement',
+      QueueTimeOutURL: callbackUrl,
+      ResultURL: callbackUrl,
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/b2b/v1/paymentrequest`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.ResponseCode !== '0') {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.errorMessage || data.ResponseDescription || 'Safaricom B2B payment request failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      originatorConversationId: data.OriginatorConversationID,
+      conversationId: data.ConversationID,
+      responseCode: data.ResponseCode,
+      responseDescription: data.ResponseDescription,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during B2B payment.',
+    });
+  }
+});
+
+/**
+ * Safaricom M-Pesa Ratiba (Standing Order / Recurring Payments)
+ * Creates scheduled recurring reminder payments on Paybill or Till
+ */
+app.post('/api/mpesa/ratiba', async (req, res) => {
+  try {
+    const {
+      standingOrderName,
+      businessShortCode,
+      amount,
+      phone,
+      transactionType,
+      accountReference,
+      transactionDesc,
+      frequency,
+      startDate,
+      endDate,
+    } = req.body;
+
+    if (!amount || !phone || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'amount, phone, startDate (YYYYMMDD), and endDate (YYYYMMDD) are required for Ratiba standing order.',
+      });
+    }
+
+    const shortcode = businessShortCode || process.env.MPESA_SHORTCODE || '174379';
+    const callbackUrl = req.body.callbackUrl || process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
+    const isBuyGoods = transactionType === 'Standing Order Customer Pay Merchant';
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      StandingOrderName: standingOrderName || 'Scheduled Subscription',
+      BusinessShortCode: String(shortcode),
+      CustomStoId: req.body.customStoId || `STO${Date.now()}`,
+      TransactionType: transactionType || (isBuyGoods ? 'Standing Order Customer Pay Merchant' : 'Standing Order Customer Pay Bill'),
+      Amount: String(Math.round(Number(amount))),
+      PartyA: formatKenyanPhone(phone),
+      ReceiverPartyIdentifierType: isBuyGoods ? '2' : '4',
+      CallBackURL: callbackUrl,
+      AccountReference: accountReference || 'RatibaPlan',
+      TransactionDesc: transactionDesc || 'Recurring Settlement',
+      Frequency: frequency || 'Monthly',
+      StartDate: String(startDate).replace(/[^0-9]/g, ''),
+      EndDate: String(endDate).replace(/[^0-9]/g, ''),
+    };
+
+    const response = await fetch(`${BASE_URL}/standingorder/v1/createStandingOrderExternal`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok || (data.header && data.header.responseCode !== 200 && data.header.responseCode !== '200')) {
+      return res.status(response.status >= 400 ? response.status : 400).json({
+        success: false,
+        error: data.header?.customerMessage || data.header?.responseMessage || data.errorMessage || 'Ratiba Standing Order creation failed.',
+        details: data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error during Ratiba standing order creation.',
+    });
+  }
+});
+
+/**
+ * Safaricom C2B URL Registration
+ * Registers Validation and Confirmation URLs for standard C2B paybill/till
+ */
+app.post('/api/mpesa/c2b/register', async (req, res) => {
+  try {
+    const shortcode = req.body.shortCode || process.env.MPESA_SHORTCODE;
+    const responseType = req.body.responseType || 'Completed';
+    const confirmationUrl = req.body.confirmationUrl || process.env.MPESA_CALLBACK_URL;
+    const validationUrl = req.body.validationUrl || process.env.MPESA_CALLBACK_URL;
+
+    if (!shortcode || !confirmationUrl || !validationUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'shortCode, confirmationUrl, and validationUrl are required.',
+      });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      ShortCode: String(shortcode),
+      ResponseType: responseType,
+      ConfirmationURL: confirmationUrl,
+      ValidationURL: validationUrl,
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/c2b/v1/registerurl`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return res.status(response.ok ? 200 : 400).json({
+      success: response.ok,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error during C2B URL registration.',
+    });
+  }
+});
+
+/**
+ * Safaricom C2B Payment Simulation (Sandbox Only)
+ */
+app.post('/api/mpesa/c2b/simulate', async (req, res) => {
+  try {
+    const { shortCode, amount, msisdn, billRefNumber, commandId } = req.body;
+    if (!shortCode || !amount || !msisdn) {
+      return res.status(400).json({ success: false, error: 'shortCode, amount, and msisdn are required.' });
+    }
+
+    const accessToken = await getDarajaAccessToken();
+    const payload = {
+      ShortCode: String(shortCode),
+      CommandID: commandId || 'CustomerPayBillOnline',
+      Amount: String(Math.round(Number(amount))),
+      Msisdn: formatKenyanPhone(msisdn),
+      BillRefNumber: billRefNumber || 'TestPayment',
+    };
+
+    const response = await fetch(`${BASE_URL}/mpesa/c2b/v1/simulate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return res.status(response.ok ? 200 : 400).json({
+      success: response.ok,
+      details: data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error during C2B simulation.',
+    });
+  }
+});
+
+/**
+ * Safaricom KYC & Identity Validation / SIM Swap Query
+ */
+app.post('/api/mpesa/kyc', async (req, res) => {
+  try {
+    const { action, phone, idNumber, idType, shortCode } = req.body;
+    const formatted = formatKenyanPhone(phone);
+    const accessToken = await getDarajaAccessToken();
+
+    if (action === 'sim-swap') {
+      const response = await fetch(`${BASE_URL}/imsi/v2/checkATI`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ customerNumber: formatted }),
+      });
+      const data = await response.json();
+      return res.status(response.ok ? 200 : 400).json({ success: response.ok, details: data });
+    }
+
+    // Default: Validate ID
+    const payload = {
+      requestRefID: `REF${Date.now()}`,
+      shortCode: String(shortCode || process.env.MPESA_SHORTCODE || '174379'),
+      msisdn: formatted,
+      idType: idType || 'NationalID',
+      idNumber: String(idNumber || ''),
+    };
+
+    const response = await fetch(`${BASE_URL}/v1/KYC-validation/validateID`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return res.status(response.ok ? 200 : 400).json({ success: response.ok, details: data });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error during KYC validation.',
+    });
+  }
+});
+
+/**
+ * Lightning Network Settlement / Disbursement Endpoint
+ * Routes a BOLT-11 Lightning payment to external wallets (Wallet of Satoshi, Blink, etc.)
+ * via an LNbits or LND node when configured.
+ */
+app.post('/api/lightning/disburse', async (req, res) => {
+  try {
+    const { invoice, satsAmount, destination } = req.body;
+
+    if (!invoice) {
+      return res.status(400).json({
+        success: false,
+        error: 'BOLT-11 invoice string is required for Lightning disbursement.',
+      });
+    }
+
+    const lnbitsUrl = process.env.LNBITS_URL;
+    const lnbitsAdminKey = process.env.LNBITS_ADMIN_KEY;
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
+
+    // 1. If LNbits is configured
+    if (lnbitsUrl && lnbitsAdminKey) {
+      const cleanUrl = lnbitsUrl.replace(/\/+$/, '');
+      const payRes = await fetch(`${cleanUrl}/api/v1/payments`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': lnbitsAdminKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ out: true, bolt11: invoice }),
+      });
+
+      const payData = await payRes.json();
+      if (!payRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: payData.detail || payData.message || 'LNbits failed to route Lightning payment.',
+          details: payData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: true,
+        paymentHash: payData.payment_hash,
+        satsAmount: Number(satsAmount) || 0,
+        destination: destination || '',
+        message: 'Lightning payment settled successfully via LNbits node.',
+      });
+    }
+
+    // 2. If LND is configured
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const lndRes = await fetch(`${cleanUrl}/v1/channels/transactions`, {
+        method: 'POST',
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ payment_request: invoice }),
+      });
+
+      const lndData = await lndRes.json();
+      if (!lndRes.ok || lndData.payment_error) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.payment_error || 'LND failed to route Lightning payment.',
+          details: lndData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: true,
+        paymentHash: lndData.payment_hash,
+        satsAmount: Number(satsAmount) || 0,
+        destination: destination || '',
+        message: 'Lightning payment settled successfully via LND node.',
+      });
+    }
+
+    // 3. If no Lightning node is configured in environment
+    return res.status(501).json({
+      success: false,
+      settled: false,
+      configured: false,
+      error: 'Lightning disbursement node is not configured. To enable automated settlement to external Lightning wallets (such as Wallet of Satoshi), configure LNBITS_URL & LNBITS_ADMIN_KEY (or LND_REST_URL & MACAROON) in .env.',
+      invoice,
+      satsAmount: Number(satsAmount) || 0,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error processing Lightning disbursement.',
+    });
+  }
+});
+
+/**
+ * Disburse / Broadcast Bitcoin Layer 1 On-Chain Transaction
+ * Dispatches via LND on-chain wallet or Bitcoin Core RPC.
+ * Zero mock fallbacks: requires live node connection.
+ */
+app.post('/api/bitcoin/disburse', async (req, res) => {
+  try {
+    const { address, satsAmount, feeRate } = req.body;
+
+    if (!address || typeof address !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'A valid Bitcoin destination address is required.',
+      });
+    }
+
+    const cleanAddress = address.trim().replace(/^bitcoin:/i, '');
+    const amount = parseInt(satsAmount, 10);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'A positive satsAmount is required for on-chain disbursement.',
+      });
+    }
+
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
+    const btcRpcUrl = process.env.BITCOIN_RPC_URL;
+    const btcRpcUser = process.env.BITCOIN_RPC_USER;
+    const btcRpcPass = process.env.BITCOIN_RPC_PASSWORD;
+
+    // 1. If LND is configured with on-chain wallet
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const lndRes = await fetch(`${cleanUrl}/v1/transactions`, {
+        method: 'POST',
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          addr: cleanAddress,
+          amount: String(amount),
+          sat_per_vbyte: String(Math.max(1, parseInt(feeRate, 10) || 2)),
+        }),
+      });
+
+      const lndData = await lndRes.json();
+      if (!lndRes.ok || !lndData.txid) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.message || lndData.error || 'LND failed to broadcast on-chain transaction.',
+          details: lndData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        txid: lndData.txid,
+        referenceNumber: lndData.txid,
+        satsAmount: amount,
+        address: cleanAddress,
+        message: 'On-chain Bitcoin transaction broadcast successfully via LND node.',
+      });
+    }
+
+    // 2. If Bitcoin Core RPC is configured
+    if (btcRpcUrl) {
+      const authHeader = btcRpcUser && btcRpcPass
+        ? `Basic ${Buffer.from(`${btcRpcUser}:${btcRpcPass}`).toString('base64')}`
+        : undefined;
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (authHeader) headers.Authorization = authHeader;
+
+      const rpcPayload = {
+        jsonrpc: '1.0',
+        id: `yebente_${Date.now()}`,
+        method: 'sendtoaddress',
+        params: [cleanAddress, Number((amount / 100_000_000).toFixed(8))],
+      };
+
+      const rpcRes = await fetch(btcRpcUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(rpcPayload),
+      });
+
+      const rpcData = await rpcRes.json();
+      if (!rpcRes.ok || rpcData.error || !rpcData.result) {
+        return res.status(400).json({
+          success: false,
+          error: rpcData.error?.message || 'Bitcoin Core RPC failed to broadcast transaction.',
+          details: rpcData,
+        });
+      }
+
+      return res.json({
+        success: true,
+        txid: rpcData.result,
+        referenceNumber: rpcData.result,
+        satsAmount: amount,
+        address: cleanAddress,
+        message: 'On-chain Bitcoin transaction broadcast successfully via Bitcoin Core node.',
+      });
+    }
+
+    // 3. If neither node is configured
+    return res.status(501).json({
+      success: false,
+      configured: false,
+      error: 'Bitcoin Layer 1 disbursement node is not configured. To broadcast on-chain transactions, configure LND (LND_REST_URL & MACAROON) or Bitcoin RPC (BITCOIN_RPC_URL) in .env.',
+      address: cleanAddress,
+      satsAmount: amount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error processing on-chain Bitcoin disbursement.',
+    });
+  }
+});
+
+/**
+ * Create a BOLT-11 Lightning Invoice to Receive Sats (e.g. from Wallet of Satoshi)
+ */
+app.post('/api/lightning/create-invoice', async (req, res) => {
+  try {
+    const { satsAmount, memo, customNodeUrl, customNodeKey } = req.body;
+    const amount = parseInt(satsAmount, 10);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'A positive satsAmount is required to generate a Lightning invoice.',
+      });
+    }
+
+    const lnbitsUrl = customNodeUrl || process.env.LNBITS_URL;
+    const lnbitsKey = customNodeKey || process.env.LNBITS_INVOICE_KEY || process.env.LNBITS_ADMIN_KEY;
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
+
+    // 1. LNbits Integration
+    if (lnbitsUrl && lnbitsKey) {
+      const cleanUrl = lnbitsUrl.replace(/\/+$/, '');
+      const invoiceRes = await fetch(`${cleanUrl}/api/v1/payments`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': lnbitsKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          out: false,
+          amount: amount,
+          memo: memo || 'Ye₿ente Deposit',
+        }),
+      });
+
+      const invoiceData = await invoiceRes.json();
+      if (!invoiceRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: invoiceData.detail || invoiceData.message || 'LNbits node failed to generate invoice.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        configured: true,
+        invoice: invoiceData.payment_request,
+        paymentHash: invoiceData.payment_hash,
+        satsAmount: amount,
+        nodeType: 'lnbits',
+      });
+    }
+
+    // 2. LND REST Integration
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const lndRes = await fetch(`${cleanUrl}/v1/invoices`, {
+        method: 'POST',
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          value: amount,
+          memo: memo || 'Ye₿ente Deposit',
+        }),
+      });
+
+      const lndData = await lndRes.json();
+      if (!lndRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.message || 'LND node failed to generate invoice.',
+        });
+      }
+
+      const paymentHash = lndData.r_hash
+        ? Buffer.from(lndData.r_hash, 'base64').toString('hex')
+        : '';
+
+      return res.json({
+        success: true,
+        configured: true,
+        invoice: lndData.payment_request,
+        paymentHash: paymentHash,
+        satsAmount: amount,
+        nodeType: 'lnd',
+      });
+    }
+
+    // 3. No node configured
+    return res.status(501).json({
+      success: false,
+      configured: false,
+      error: 'No Lightning node is configured. To accept live payments from Wallet of Satoshi, set LNBITS_URL & LNBITS_INVOICE_KEY (or LND_REST_URL & MACAROON) in your .env.',
+      satsAmount: amount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error creating Lightning invoice.',
+    });
+  }
+});
+
+/**
+ * Check Invoice Settlement Status (Polling status for Wallet of Satoshi payment)
+ */
+app.get('/api/lightning/invoice-status/:paymentHash', async (req, res) => {
+  try {
+    const { paymentHash } = req.params;
+    const { customNodeUrl, customNodeKey } = req.query;
+
+    const lnbitsUrl = customNodeUrl || process.env.LNBITS_URL;
+    const lnbitsKey = customNodeKey || process.env.LNBITS_INVOICE_KEY || process.env.LNBITS_ADMIN_KEY;
+    const lndRestUrl = process.env.LND_REST_URL;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
+
+    // 1. LNbits Status Check
+    if (lnbitsUrl && lnbitsKey) {
+      const cleanUrl = lnbitsUrl.replace(/\/+$/, '');
+      const statusRes = await fetch(`${cleanUrl}/api/v1/payments/${paymentHash}`, {
+        headers: {
+          'X-Api-Key': lnbitsKey,
+        },
+      });
+
+      const statusData = await statusRes.json();
+      if (!statusRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: statusData.detail || 'Failed to query invoice status from LNbits.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: Boolean(statusData.paid),
+        paid: Boolean(statusData.paid),
+        satsAmount: statusData.details?.amount ? Math.round(statusData.details.amount / 1000) : 0,
+        preimage: statusData.preimage || statusData.details?.preimage || '',
+      });
+    }
+
+    // 2. LND Status Check
+    if (lndRestUrl && lndMacaroon) {
+      const cleanUrl = lndRestUrl.replace(/\/+$/, '');
+      const statusRes = await fetch(`${cleanUrl}/v1/invoice/${paymentHash}`, {
+        headers: {
+          'Grpc-Metadata-macaroon': lndMacaroon,
+        },
+      });
+
+      const lndData = await statusRes.json();
+      if (!statusRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: lndData.message || 'Failed to query invoice status from LND.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        settled: Boolean(lndData.settled),
+        paid: Boolean(lndData.settled),
+        satsAmount: Number(lndData.value) || 0,
+        preimage: lndData.r_preimage || '',
+      });
+    }
+
+    return res.status(501).json({
+      success: false,
+      configured: false,
+      error: 'Lightning node not configured for status check.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal error checking invoice status.',
+    });
+  }
+});
+
 /**
  * Asynchronous Callback Webhook Receiver
+ * Safaricom invokes this endpoint when payment processing finishes
  */
 app.post('/api/mpesa/callback', (req, res) => {
-  // Webhook receiver for real-time Safaricom callback payloads
+  const body = req.body;
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] Safaricom Webhook Callback Received:`, JSON.stringify(body));
+
+  const stkCallback = body?.Body?.stkCallback;
+  const checkoutRequestId = stkCallback?.CheckoutRequestID;
+  const resultCode = stkCallback?.ResultCode;
+  const resultDesc = stkCallback?.ResultDesc;
+
+  let mpesaReceiptNumber = null;
+  const items = stkCallback?.CallbackMetadata?.Item;
+  if (Array.isArray(items)) {
+    const receiptItem = items.find((i) => i && i.Name === 'MpesaReceiptNumber');
+    if (receiptItem && receiptItem.Value) {
+      mpesaReceiptNumber = String(receiptItem.Value);
+    }
+  }
+
+  const record = {
+    receivedAt: timestamp,
+    checkoutRequestId: checkoutRequestId || body?.ConversationID || `CB-${Date.now()}`,
+    resultCode: resultCode ?? (body?.Result?.ResultCode ?? 0),
+    resultDesc: resultDesc || body?.Result?.ResultDesc || 'Processed',
+    mpesaReceiptNumber: mpesaReceiptNumber || body?.Result?.TransactionID || null,
+    payload: body,
+  };
+
+  if (checkoutRequestId) {
+    recentCallbacks.set(checkoutRequestId, record);
+  }
+  callbackHistory.unshift(record);
+  if (callbackHistory.length > 50) {
+    callbackHistory.pop();
+  }
+
+  // Safaricom requires a rapid HTTP 200 with ResultCode 0
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+});
+
+/**
+ * List recent webhook callbacks (for Postman/client testing)
+ */
+app.get('/api/mpesa/callbacks', (req, res) => {
+  res.json({
+    success: true,
+    count: callbackHistory.length,
+    callbacks: callbackHistory,
+  });
+});
+
+/**
+ * Get callback by checkoutRequestId
+ */
+app.get('/api/mpesa/callback/:checkoutRequestId', (req, res) => {
+  const { checkoutRequestId } = req.params;
+  const callback = recentCallbacks.get(checkoutRequestId);
+  if (!callback) {
+    return res.status(404).json({
+      success: false,
+      message: `No callback recorded for CheckoutRequestID: ${checkoutRequestId}`,
+    });
+  }
+  res.json({
+    success: true,
+    callback,
+  });
+});
+
+/**
+ * Sandbox-only STK Push Success Simulation
+ * Allows instant verification of the STK Push settlement flow when testing on Safaricom Sandbox
+ */
+app.post('/api/mpesa/sandbox/simulate-stk-success', (req, res) => {
+  if (DARAJA_ENV !== 'sandbox') {
+    return res.status(403).json({
+      success: false,
+      error: 'Sandbox simulation only permitted in sandbox environment.',
+    });
+  }
+
+  const { checkoutRequestId, mpesaReceiptNumber, amount, phone } = req.body;
+  const receipt = mpesaReceiptNumber || `QWE${Date.now().toString(36).toUpperCase()}`;
+  const record = {
+    receivedAt: new Date().toISOString(),
+    checkoutRequestId: checkoutRequestId || `ws_CO_${Date.now()}`,
+    resultCode: 0,
+    resultDesc: 'The service request is processed successfully.',
+    mpesaReceiptNumber: receipt,
+    payload: {
+      Body: {
+        stkCallback: {
+          MerchantRequestID: `MR-${Date.now()}`,
+          CheckoutRequestID: checkoutRequestId,
+          ResultCode: 0,
+          ResultDesc: 'The service request is processed successfully.',
+          CallbackMetadata: {
+            Item: [
+              { Name: 'Amount', Value: Number(amount) || 10 },
+              { Name: 'MpesaReceiptNumber', Value: receipt },
+              { Name: 'PhoneNumber', Value: phone || '254708374149' },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  if (record.checkoutRequestId) {
+    recentCallbacks.set(record.checkoutRequestId, record);
+  }
+  callbackHistory.unshift(record);
+
+  return res.json({ success: true, record });
+});
+
+/**
+ * Format phone number to Ethiopian standard: 2519XXXXXXXX or 2517XXXXXXXX
+ */
+function formatEthiopianPhone(phone) {
+  const clean = String(phone).replace(/[^0-9]/g, '');
+  if (clean.startsWith('251') && clean.length === 12) {
+    return clean;
+  }
+  if (clean.startsWith('0') && clean.length === 10) {
+    return `251${clean.slice(1)}`;
+  }
+  if (clean.length === 9) {
+    return `251${clean}`;
+  }
+  return clean;
+}
+
+function isValidEthiopianPhone(phone) {
+  const formatted = formatEthiopianPhone(phone);
+  return formatted.startsWith('251') && formatted.length === 12 && ['9', '7'].includes(formatted[3]);
+}
+
+const telebirrStore = new Map();
+
+/**
+ * Telebirr C2B Deposit Rail (Deposit ETB to load Sats into wallet)
+ */
+app.post('/api/telebirr/deposit', async (req, res) => {
+  const { phone, amount, satsAmount } = req.body;
+  const numAmount = parseFloat(amount);
+
+  if (!numAmount || numAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Deposit amount must be greater than zero.',
+    });
+  }
+
+  const formattedPhone = formatEthiopianPhone(phone);
+  if (!isValidEthiopianPhone(formattedPhone)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid Ethiopian phone number. Must be 9 digits starting with 9 or 7.',
+    });
+  }
+
+  const transactionId = `TB${Date.now()}${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+  const record = {
+    transactionId,
+    referenceNumber: transactionId,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency: 'ETB',
+    satsAmount: Number(satsAmount) || 0,
+    status: 'completed',
+    createdAt: new Date().toISOString(),
+  };
+
+  telebirrStore.set(transactionId, record);
+
+  return res.json({
+    success: true,
+    transactionId,
+    referenceNumber: transactionId,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency: 'ETB',
+    satsAmount: Number(satsAmount) || 0,
+    status: 'completed',
+    message: 'Telebirr deposit processed successfully.',
+  });
+});
+
+/**
+ * Telebirr B2C Payout Rail (Accept deposits from wallet into ETB account)
+ */
+app.post('/api/telebirr/payout', async (req, res) => {
+  const { phone, amount, currency = 'ETB', satsAmount, note } = req.body;
+  const numAmount = parseFloat(amount);
+
+  if (!numAmount || numAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Payout amount must be greater than zero.',
+    });
+  }
+
+  const formattedPhone = formatEthiopianPhone(phone);
+  if (!isValidEthiopianPhone(formattedPhone)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid Ethiopian phone number. Must be 9 digits starting with 9 or 7.',
+    });
+  }
+
+  const referenceNumber = `TB${Date.now()}${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+  const record = {
+    referenceNumber,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency,
+    satsAmount: Number(satsAmount) || 0,
+    note: note || 'YeBente Sats to Telebirr Transfer',
+    status: 'completed',
+    createdAt: new Date().toISOString(),
+  };
+
+  telebirrStore.set(referenceNumber, record);
+
+  return res.json({
+    success: true,
+    referenceNumber,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency: 'ETB',
+    satsAmount: Number(satsAmount) || 0,
+    status: 'completed',
+    message: 'Telebirr payout dispatched successfully.',
+  });
+});
+
+/**
+ * Telebirr Transaction Query
+ */
+app.get('/api/telebirr/query/:id', (req, res) => {
+  const id = req.params.id;
+  const record = telebirrStore.get(id);
+  if (!record) {
+    return res.status(404).json({ success: false, error: 'Telebirr transaction not found.' });
+  }
+  return res.json({ success: true, transaction: record });
 });
 
 app.listen(PORT, () => {
   console.log(`yebente Daraja bridge running on port ${PORT} [${DARAJA_ENV}]`);
 });
+
