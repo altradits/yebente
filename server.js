@@ -1,5 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config({ override: true });
 
@@ -1620,6 +1622,21 @@ app.get('/api/telebirr/query/:id', (req, res) => {
     return res.status(404).json({ success: false, error: 'Telebirr transaction not found.' });
   }
   return res.json({ success: true, transaction: record });
+});
+
+// Serve static frontend assets from dist in production
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.join(__dirname, 'dist');
+
+app.use(express.static(distPath));
+
+// For SPA routing: any non-API route serves dist/index.html
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 app.listen(PORT, () => {
