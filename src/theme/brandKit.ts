@@ -151,9 +151,12 @@ export function savePaletteId(id: string): void {
   }
 }
 
-export function applyPalette(id: string): void {
+export const DEFAULT_PALETTE_ID = 'obsidianPlum';
+export const DEFAULT_PALETTE = PALETTES.obsidianPlum;
+
+export function applyPalette(id?: string): void {
   if (typeof document === 'undefined') return;
-  const palette = PALETTES[id] || PALETTES.obsidianPlum;
+  const palette = (id && PALETTES[id]) || PALETTES.obsidianPlum;
   const root = document.documentElement;
   const t = palette.tokens;
 
@@ -176,4 +179,9 @@ export function applyPalette(id: string): void {
   root.style.setProperty('--text-disabled', t.textDisabled);
   root.style.setProperty('--status-success', t.statusSuccess);
   root.style.setProperty('--status-error', t.statusError);
+}
+
+// Automatically apply the brand kit palette on load
+if (typeof document !== 'undefined') {
+  applyPalette(getSavedPaletteId());
 }

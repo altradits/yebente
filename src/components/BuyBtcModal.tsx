@@ -1,9 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import { ArrowLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle, Zap, Copy, Check, RefreshCw } from 'lucide-react';
-import { initiateStkPush, queryStkStatus, isValidKenyanPhone, formatKenyanDisplayPhone } from '../services/mpesaService';
+import {
+  initiateStkPush,
+  queryStkStatus,
+  isValidKenyanPhone,
+  formatKenyanDisplayPhone,
+  simulateSandboxStkSuccess,
+} from '../services/mpesaService';
+import {
+  isValidEthiopianPhone,
+  formatEthiopianDisplayPhone,
+  initiateTelebirrDeposit,
+} from '../services/telebirrService';
 import { isLightningAddress, resolveLightningAddress, createLightningInvoice } from '../services/lightningService';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
+import { EthiopiaPhoneInput } from './EthiopiaPhoneInput';
 
 interface BuyBtcModalProps {
   isOpen: boolean;
@@ -20,7 +32,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   rates,
   onSuccess,
 }) => {
-  const [source, setSource] = useState<'mpesa' | 'telebirr'>('mpesa');
+  const [rail, setRail] = useState<'mpesa' | 'telebirr'>('mpesa');
   const [amountFiat, setAmountFiat] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'awaiting_pin' | 'success' | 'error'>('input');
@@ -31,12 +43,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const [pinSecondsLeft, setPinSecondsLeft] = useState<number>(45);
   const [lightningInvoice, setLightningInvoice] = useState<string>('');
   const [copiedInvoice, setCopiedInvoice] = useState(false);
-  const [destMode, setDestMode] = useState<'custodial' | 'external'>(
-    wallet.type === 'non-custodial' ? 'external' : 'custodial'
-  );
-  const [externalAddress, setExternalAddress] = useState<string>(
-    wallet.nonCustodialAddress || ''
-  );
+  const isCustodialWallet = wallet.type === 'custodial';
+  const configuredDestination = isCustodialWallet
+    ? 'In-App Vault'
+    : wallet.nonCustodialAddress;
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -50,18 +60,15 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentRate = source === 'mpesa' ? rates.btcKes : rates.btcEtb;
-  const currencyCode = source === 'mpesa' ? 'KES' : 'ETB';
+  const currentRate = rail === 'mpesa' ? rates.btcKes : rates.btcEtb;
+  const currencyCode = rail === 'mpesa' ? 'KES' : 'ETB';
   const numericFiat = parseFloat(amountFiat) || 0;
   const satsAmount = currentRate > 0 ? Math.round((numericFiat / currentRate) * 100_000_000) : 0;
-  const estimatedFee = source === 'mpesa' ? 50 : 20;
+  const estimatedFee = rail === 'mpesa' ? 50 : 25;
 
-  const handleSourceChange = (newSource: 'mpesa' | 'telebirr') => {
-    setSource(newSource);
-    setPhone('');
-    setAmountFiat('');
-    setErrorMessage('');
-  };
+  const displayPhone = rail === 'mpesa'
+    ? formatKenyanDisplayPhone(phone)
+    : formatEthiopianDisplayPhone(phone);
 
   const handleCopyInvoice = () => {
     if (lightningInvoice) {
@@ -75,6 +82,18 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     if (!activeCheckoutId || isVerifyingStatus) return;
     setIsVerifyingStatus(true);
     try {
+      const queryRes = await queryStkStatus(activeCheckoutId);
+      processQueryResponse(queryRes);
+    } finally {
+      setIsVerifyingStatus(false);
+    }
+  };
+
+  const handleSimulateSandboxSuccess = async () => {
+    if (!activeCheckoutId || isVerifyingStatus) return;
+    setIsVerifyingStatus(true);
+    try {
+      await simulateSandboxStkSuccess(activeCheckoutId, numericFiat, phone);
       const queryRes = await queryStkStatus(activeCheckoutId);
       processQueryResponse(queryRes);
     } finally {
@@ -96,7 +115,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
       onSuccess({
         type: 'buy_btc',
-        title: 'Bought Sats via M-Pesa',
+        title: 'Buy Sats via M-Pesa',
         status: 'completed',
         fromCurrency: 'KES',
         fromAmount: numericFiat,
@@ -105,10 +124,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
         rateUsed: currentRate,
         fee: estimatedFee,
         feeCurrency: 'KES',
-        recipient: destMode === 'custodial' ? 'In-App Custodial Wallet' : externalAddress,
+        recipient: isCustodialWallet ? 'In-App Custodial Wallet' : configuredDestination,
         referenceNumber: refCode,
-        walletType: destMode === 'custodial' ? 'custodial' : 'non-custodial',
-        note: `Daraja STK purchase to ${destMode === 'custodial' ? 'Custodial balance' : (externalAddress || 'Self-custody')}`,
+        walletType: wallet.type,
+        note: `Daraja STK purchase to ${configuredDestination}`,
       });
 
       setStep('success');
@@ -140,86 +159,129 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const handleConfirm = async () => {
     if (numericFiat <= 0) return;
 
-    if (source === 'telebirr') {
-      setErrorMessage('Telebirr live settlement rail will be activated in Issue #5. Please select M-Pesa for live settlement.');
-      setStep('error');
-      return;
-    }
-
-    if (!isValidKenyanPhone(phone)) {
-      setErrorMessage('Please enter a valid Safaricom number: 07XXXXXXXX or 01XXXXXXXX');
-      setStep('error');
-      return;
-    }
-
     if (currentRate <= 0) {
       setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats purchase.');
       setStep('error');
       return;
     }
 
-    setStep('processing');
-    setErrorMessage('');
+    if (rail === 'mpesa') {
+      if (!isValidKenyanPhone(phone)) {
+        setErrorMessage('Please enter a valid Safaricom number: 07XXXXXXXX or 01XXXXXXXX');
+        setStep('error');
+        return;
+      }
 
-    const res = await initiateStkPush({
-      phone,
-      amount: numericFiat,
-      accountReference: 'BuySats',
-      transactionDesc: 'Bitcoin Purchase',
-    });
+      setStep('processing');
+      setErrorMessage('');
 
-    if (!res.success || !res.checkoutRequestId) {
-      setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt: No CheckoutRequestID returned.');
-      setStep('error');
-      return;
-    }
+      const res = await initiateStkPush({
+        phone,
+        amount: numericFiat,
+        accountReference: 'BuySats',
+        transactionDesc: 'Bitcoin Purchase',
+      });
 
-    const refCode = res.checkoutRequestId;
-    setActiveCheckoutId(refCode);
-    setRealReference(refCode);
-    setPinSecondsLeft(45);
+      if (!res.success || !res.checkoutRequestId) {
+        setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt: No CheckoutRequestID returned.');
+        setStep('error');
+        return;
+      }
 
-    if (destMode === 'external' && externalAddress && isLightningAddress(externalAddress)) {
-      try {
-        const details = await resolveLightningAddress(externalAddress);
-        if (details.success && details.callbackUrl) {
-          const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Ye₿ente Sats Purchase');
-          if (invRes.success && invRes.invoice) {
-            setLightningInvoice(invRes.invoice);
+      const refCode = res.checkoutRequestId;
+      setActiveCheckoutId(refCode);
+      setRealReference(refCode);
+      setPinSecondsLeft(45);
+
+      if (!isCustodialWallet && isLightningAddress(configuredDestination)) {
+        try {
+          const details = await resolveLightningAddress(configuredDestination);
+          if (details.success && details.callbackUrl) {
+            const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Ye₿ente Sats Purchase');
+            if (invRes.success && invRes.invoice) {
+              setLightningInvoice(invRes.invoice);
+            }
+          }
+        } catch {
+          // Safe fallback
+        }
+      }
+
+      setStep('awaiting_pin');
+
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+
+      let remaining = 45;
+      pollIntervalRef.current = setInterval(async () => {
+        remaining -= 2;
+        setPinSecondsLeft(Math.max(0, remaining));
+
+        try {
+          const queryRes = await queryStkStatus(refCode);
+          processQueryResponse(queryRes);
+        } catch {
+          // Continue polling until timeout
+        }
+
+        if (remaining <= 0) {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
           }
         }
-      } catch {
-        // Safe fallback
+      }, 2500);
+    } else {
+      // Telebirr ETB Deposit
+      if (!isValidEthiopianPhone(phone)) {
+        setErrorMessage('Please enter a valid Telebirr number: 09XXXXXXXX or 07XXXXXXXX');
+        setStep('error');
+        return;
       }
-    }
 
-    // Transition to awaiting_pin: await genuine Safaricom PIN entry and confirmation
-    setStep('awaiting_pin');
-
-    // Start polling Safaricom status every 2.5 seconds
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-    }
-
-    let remaining = 45;
-    pollIntervalRef.current = setInterval(async () => {
-      remaining -= 2;
-      setPinSecondsLeft(Math.max(0, remaining));
+      setStep('processing');
+      setErrorMessage('');
 
       try {
-        const queryRes = await queryStkStatus(refCode);
-        processQueryResponse(queryRes);
-      } catch {
-        // Continue polling until timeout
-      }
+        const res = await initiateTelebirrDeposit({
+          phone,
+          amount: numericFiat,
+          satsAmount,
+        });
 
-      if (remaining <= 0) {
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
+        if (!res.success) {
+          setErrorMessage(res.error || 'Failed to process Telebirr deposit.');
+          setStep('error');
+          return;
         }
+
+        const refCode = res.referenceNumber || res.transactionId || `TB${Date.now()}`;
+        setRealReference(refCode);
+
+        onSuccess({
+          type: 'buy_btc',
+          title: 'Buy Sats via Telebirr',
+          status: 'completed',
+          fromCurrency: 'ETB',
+          fromAmount: numericFiat,
+          toCurrency: 'SATS',
+          toAmount: satsAmount,
+          rateUsed: currentRate,
+          fee: estimatedFee,
+          feeCurrency: 'ETB',
+          recipient: isCustodialWallet ? 'In-App Vault' : configuredDestination,
+          referenceNumber: refCode,
+          walletType: wallet.type,
+          note: `Telebirr deposit to ${configuredDestination}`,
+        });
+
+        setStep('success');
+      } catch (err: unknown) {
+        setErrorMessage(err instanceof Error ? err.message : 'Error processing Telebirr deposit.');
+        setStep('error');
       }
-    }, 2500);
+    }
   };
 
   const handleResetAndClose = () => {
@@ -248,6 +310,11 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     handleResetAndClose();
   };
 
+  const isFormValid =
+    numericFiat > 0 &&
+    currentRate > 0 &&
+    (rail === 'mpesa' ? isValidKenyanPhone(phone) : isValidEthiopianPhone(phone));
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
@@ -269,29 +336,35 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <>
-              {/* Payment Rail Selector */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Mobile Network Tab Selector */}
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select mobile network">
                 <button
                   type="button"
-                  onClick={() => handleSourceChange('mpesa')}
+                  onClick={() => {
+                    setRail('mpesa');
+                    setPhone('');
+                  }}
                   className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    source === 'mpesa'
+                    rail === 'mpesa'
                       ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
                       : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
                   }`}
                 >
-                  M-Pesa
+                  M-Pesa (KES)
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleSourceChange('telebirr')}
+                  onClick={() => {
+                    setRail('telebirr');
+                    setPhone('');
+                  }}
                   className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    source === 'telebirr'
+                    rail === 'telebirr'
                       ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
                       : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
                   }`}
                 >
-                  Telebirr
+                  Telebirr (ETB)
                 </button>
               </div>
 
@@ -323,64 +396,21 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 </span>
               </div>
 
-              {/* Destination Mode */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDestMode('custodial')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    destMode === 'custodial'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  In-App Vault
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDestMode('external')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    destMode === 'external'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  External Address
-                </button>
-              </div>
-
-              {destMode === 'external' && (
-                <div>
-                  <input
-                    type="text"
-                    value={externalAddress}
-                    onChange={(e) => setExternalAddress(e.target.value)}
-                    placeholder="Lightning address or bc1q..."
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                </div>
-              )}
-
-              {/* Phone number */}
-              {source === 'mpesa' ? (
+              {/* Phone input component */}
+              {rail === 'mpesa' ? (
                 <KenyaPhoneInput
                   value={phone}
                   onChange={(full) => setPhone(full)}
-                  label="Phone Number"
+                  label="M-Pesa Phone Number"
+                  ariaLabel="M-Pesa phone number"
                 />
               ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="09XXXXXXXX"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                </div>
+                <EthiopiaPhoneInput
+                  value={phone}
+                  onChange={(full) => setPhone(full)}
+                  label="Telebirr Phone Number"
+                  ariaLabel="Telebirr phone number"
+                />
               )}
 
               {/* Network fee summary */}
@@ -393,10 +423,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={numericFiat <= 0 || !phone}
+                disabled={!isFormValid}
                 className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#763698]/20"
               >
-                Buy Sats
+                {currentRate <= 0 ? 'Rates Unavailable' : 'Buy Sats'}
               </button>
             </>
           )}
@@ -408,9 +438,11 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-bold text-[#F8F0E7]">
-                  {source === 'mpesa' ? 'Dispatching M-Pesa STK Prompt' : 'Telebirr Request Sent'}
+                  {rail === 'mpesa' ? 'Dispatching M-Pesa Prompt' : 'Processing Telebirr Deposit'}
                 </h3>
-                <p className="text-xs text-[#9B97A2] font-mono mt-1">Connecting to Safaricom Daraja...</p>
+                <p className="text-xs text-[#9B97A2] font-mono mt-1">
+                  {rail === 'mpesa' ? 'Connecting to Safaricom Daraja...' : 'Connecting to Ethio Telecom Telebirr...'}
+                </p>
               </div>
             </div>
           )}
@@ -468,6 +500,16 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
                 <button
                   type="button"
+                  onClick={handleSimulateSandboxSuccess}
+                  disabled={isVerifyingStatus}
+                  className="h-11 px-3.5 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-all disabled:opacity-50"
+                  title="Simulate Sandbox PIN Confirmation"
+                >
+                  Simulate Payment
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleResetAndClose}
                   className="h-11 px-4 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#9B97A2] hover:text-[#F8F0E7] font-medium text-xs transition-all"
                 >
@@ -484,7 +526,9 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-bold text-[#F8F0E7]">Payment Verified & Sats Credited</h3>
-                <p className="text-xs text-emerald-400 font-mono mt-0.5">Safaricom confirmed settlement successfully</p>
+                <p className="text-xs text-emerald-400 font-mono mt-0.5">
+                  {rail === 'mpesa' ? 'Safaricom confirmed settlement successfully' : 'Telebirr confirmed settlement successfully'}
+                </p>
               </div>
 
               <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
@@ -501,14 +545,18 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                   <span className="text-[#F8F0E7]">{numericFiat.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Phone Number</span>
+                  <span className="text-[#D1B9B3] font-mono">{displayPhone}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Destination</span>
                   <span className="text-[#D1B9B3] truncate max-w-[180px]">
-                    {destMode === 'custodial' ? 'In-App Custodial' : externalAddress}
+                    {configuredDestination}
                   </span>
                 </div>
                 {realReference && (
                   <div className="flex justify-between">
-                    <span className="text-[#9B97A2]">Safaricom Reference</span>
+                    <span className="text-[#9B97A2]">{rail === 'mpesa' ? 'Safaricom Reference' : 'Telebirr Reference'}</span>
                     <span className="text-[#D1B9B3] font-mono text-[10px] truncate max-w-[180px]">{realReference}</span>
                   </div>
                 )}
@@ -560,7 +608,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 <AlertTriangle className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">M-Pesa Transaction Incomplete</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Transaction Incomplete</h3>
                 <p className="text-xs text-[#9B97A2] font-mono mt-1 px-4">{errorMessage}</p>
               </div>
 

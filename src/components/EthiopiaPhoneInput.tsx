@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { extractKenyanSubscriberDigits } from '../services/mpesaService';
+import { extractEthiopianSubscriberDigits } from '../services/telebirrService';
 
-interface KenyaPhoneInputProps {
+interface EthiopiaPhoneInputProps {
   value: string;
   onChange: (fullPhone: string, rawDigits: string) => void;
   label?: string;
@@ -11,19 +11,18 @@ interface KenyaPhoneInputProps {
   required?: boolean;
 }
 
-export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
+export const EthiopiaPhoneInput: React.FC<EthiopiaPhoneInputProps> = ({
   value,
   onChange,
-  label = 'M-Pesa phone number',
+  label = 'Telebirr phone number',
   ariaLabel,
   disabled = false,
 }) => {
-  const [digits, setDigits] = useState<string>(() => extractKenyanSubscriberDigits(value));
+  const [digits, setDigits] = useState<string>(() => extractEthiopianSubscriberDigits(value));
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Keep internal digits synced if value prop changes externally
   useEffect(() => {
-    const extracted = extractKenyanSubscriberDigits(value);
+    const extracted = extractEthiopianSubscriberDigits(value);
     if (extracted !== digits) {
       setDigits(extracted);
     }
@@ -31,10 +30,10 @@ export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
-    const cleanDigits = extractKenyanSubscriberDigits(raw);
+    const cleanDigits = extractEthiopianSubscriberDigits(raw);
     setDigits(cleanDigits);
 
-    const fullPhone = cleanDigits.length > 0 ? `254${cleanDigits}` : '';
+    const fullPhone = cleanDigits.length > 0 ? `251${cleanDigits}` : '';
     onChange(fullPhone, cleanDigits);
   };
 
@@ -44,7 +43,6 @@ export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
     inputRef.current?.focus();
   };
 
-  // Formatter for display: "712 345 678"
   const formatDisplayDigits = (val: string) => {
     if (!val) return '';
     if (val.length <= 3) return val;
@@ -60,13 +58,11 @@ export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
         </label>
       )}
 
-      {/* Input container with fixed Kenya prefix */}
-      <div
-        className="flex items-center rounded-2xl bg-[#140E1B] border border-[#382B44] focus-within:border-[#763698] transition-colors overflow-hidden"
-      >
+      {/* Input container with fixed Ethiopia prefix */}
+      <div className="flex items-center rounded-2xl bg-[#140E1B] border border-[#382B44] focus-within:border-[#763698] transition-colors overflow-hidden">
         {/* Country Code Prefix Badge */}
         <div className="flex items-center px-3 py-2.5 bg-[#1E1627] border-r border-[#382B44] shrink-0 select-none">
-          <span className="text-xs font-mono font-bold text-[#F8F0E7]">+254</span>
+          <span className="text-xs font-mono font-bold text-[#F8F0E7]">+251</span>
         </div>
 
         {/* 9-digit Subscriber Number input */}
@@ -74,32 +70,27 @@ export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
           <input
             ref={inputRef}
             type="tel"
-            aria-label={ariaLabel || label || 'Kenyan phone number'}
+            aria-label={ariaLabel || label || 'Ethiopian phone number'}
             disabled={disabled}
             value={formatDisplayDigits(digits)}
             onChange={handleInputChange}
-            placeholder="7XX XXX XXX"
-            maxLength={20} // Allows pasting full international formats
+            placeholder="9XX XXX XXX"
+            maxLength={20}
             className="w-full bg-transparent pl-3.5 pr-10 py-2.5 text-sm font-mono font-bold text-[#F8F0E7] placeholder-[#554653] focus:outline-none disabled:opacity-50"
           />
 
-          <div className="absolute right-2.5 flex items-center gap-1.5">
-            {/* Quick Clear / Delete Button */}
-            {digits.length > 0 && !disabled && (
-              <button
-                type="button"
-                onClick={handleClear}
-                title="Clear phone number"
-                className="w-5 h-5 rounded-full bg-[#2A1E37] text-[#9B97A2] hover:text-[#F8F0E7] hover:bg-[#3D2B50] flex items-center justify-center transition-colors"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-
-          </div>
+          {digits.length > 0 && !disabled && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="absolute right-3 p-1 rounded-full text-[#9B97A2] hover:text-[#F8F0E7] hover:bg-[#261D32] transition-colors"
+              aria-label="Clear phone input"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
-
     </div>
   );
 };

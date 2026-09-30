@@ -5,7 +5,6 @@ import { ChevronDown } from 'lucide-react';
 interface TransactionHistoryProps {
   transactions: Transaction[];
   onSelectTransaction: (tx: Transaction) => void;
-  onClearHistory?: () => void;
 }
 
 const TYPE_TITLES: Record<string, string> = {
@@ -21,22 +20,8 @@ const TYPE_TITLES: Record<string, string> = {
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   transactions,
   onSelectTransaction,
-  onClearHistory,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [confirmingClear, setConfirmingClear] = useState(false);
-
-  const handleClearClick = () => {
-    if (!confirmingClear) {
-      setConfirmingClear(true);
-      setTimeout(() => setConfirmingClear(false), 4000);
-      return;
-    }
-    setConfirmingClear(false);
-    if (onClearHistory) {
-      onClearHistory();
-    }
-  };
 
   const validTransactions = transactions.filter((tx) => {
     if (!tx || typeof tx !== 'object') return false;
@@ -73,10 +58,11 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
       return { text: `-${sats.toLocaleString()} Sats`, isPositive: false };
     }
     if (tx.type === 'send_mpesa') {
-      return { text: `-${Number(tx.fromAmount || 0).toLocaleString()} KES`, isPositive: false };
+      return { text: `-${Number(tx.toAmount || 0).toLocaleString()} KES`, isPositive: false };
     }
     if (tx.type === 'send_telebirr') {
-      return { text: `-${Number(tx.fromAmount || 0).toLocaleString()} ETB`, isPositive: false };
+      const etbVal = tx.toCurrency === 'ETB' ? tx.toAmount : tx.fromAmount;
+      return { text: `-${Number(etbVal || 0).toLocaleString()} ETB`, isPositive: false };
     }
     return { text: `${Number(tx.fromAmount || 0).toLocaleString()} ${tx.fromCurrency}`, isPositive: false };
   };
@@ -101,16 +87,6 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </h2>
         </button>
 
-        {!isCollapsed && validTransactions.length > 0 && onClearHistory && (
-          <button
-            type="button"
-            onClick={handleClearClick}
-            className="text-xs font-mono text-[#9B97A2] hover:text-rose-400 transition-colors p-1"
-            title="Clear history"
-          >
-            {confirmingClear ? 'Confirm clear?' : 'Clear'}
-          </button>
-        )}
       </div>
 
       {/* Content */}

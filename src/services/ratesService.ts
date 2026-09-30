@@ -25,7 +25,7 @@ export function getCachedRates(): ExchangeRates | null {
 }
 
 /**
- * Fetches real-time market rates directly from Coinbase, CoinGecko, and Forex APIs.
+ * Fetches real-time market rates directly from Coinbase and Forex APIs.
  * Strictly throws an error if rate providers are unreachable and no cached live rates exist.
  */
 export async function fetchLiveRates(): Promise<ExchangeRates> {
@@ -56,33 +56,7 @@ export async function fetchLiveRates(): Promise<ExchangeRates> {
     errors.push(`Coinbase: ${err instanceof Error ? err.message : 'timeout'}`);
   }
 
-  // 2. Fetch 24h change and secondary BTC price from CoinGecko
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-    const cgRes = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
-      { signal: controller.signal }
-    );
-    clearTimeout(timeoutId);
-    if (cgRes.ok) {
-      const cgData = await cgRes.json();
-      if (cgData?.bitcoin) {
-        if (!btcUsd && cgData.bitcoin.usd) {
-          btcUsd = cgData.bitcoin.usd;
-        }
-        if (typeof cgData.bitcoin.usd_24h_change === 'number') {
-          change24hUsd = cgData.bitcoin.usd_24h_change;
-        }
-      }
-    } else {
-      errors.push(`CoinGecko HTTP ${cgRes.status}`);
-    }
-  } catch (err: unknown) {
-    errors.push(`CoinGecko: ${err instanceof Error ? err.message : 'timeout'}`);
-  }
-
-  // 3. Fetch real live Forex rates for KES and ETB against USD
+  // 2. Fetch real live Forex rates for KES and ETB against USD
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -144,6 +118,6 @@ export async function fetchLiveRates(): Promise<ExchangeRates> {
   }
 
   throw new Error(
-    `Exchange rates unavailable: Unable to retrieve live rates from Coinbase, CoinGecko, or Forex providers (${errors.join(', ')}). Connect to the internet or configure a rate feed proxy.`
+    `Exchange rates unavailable: Unable to retrieve live rates from Coinbase or Forex providers (${errors.join(', ')}). Connect to the internet or configure a rate feed proxy.`
   );
 }

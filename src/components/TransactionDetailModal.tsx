@@ -53,10 +53,11 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
       return { text: `-${sats.toLocaleString()} Sats`, isPositive: false };
     }
     if (transaction.type === 'send_mpesa') {
-      return { text: `-${Number(transaction.fromAmount || 0).toLocaleString()} KES`, isPositive: false };
+      return { text: `-${Number(transaction.toAmount || 0).toLocaleString()} KES`, isPositive: false };
     }
     if (transaction.type === 'send_telebirr') {
-      return { text: `-${Number(transaction.fromAmount || 0).toLocaleString()} ETB`, isPositive: false };
+      const etbVal = transaction.toCurrency === 'ETB' ? transaction.toAmount : transaction.fromAmount;
+      return { text: `-${Number(etbVal || 0).toLocaleString()} ETB`, isPositive: false };
     }
     return { text: `${Number(transaction.fromAmount || 0).toLocaleString()} ${transaction.fromCurrency}`, isPositive: false };
   };
@@ -128,6 +129,15 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
                 <span className="text-[#9B97A2]">Recipient</span>
                 <span className="text-[#F8F0E7] truncate max-w-[180px]">
                   {transaction.recipient}
+                </span>
+              </div>
+            )}
+
+            {transaction.type === 'send_mpesa' && (
+              <div className="flex justify-between items-center">
+                <span className="text-[#9B97A2]">Sats debited</span>
+                <span className="text-[#F8F0E7]">
+                  {(Number(transaction.fromAmount || 0) + Number(transaction.fee || 0)).toLocaleString()} Sats
                 </span>
               </div>
             )}

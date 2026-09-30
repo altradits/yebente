@@ -7,8 +7,8 @@ import {
   hasEncryptedVault,
   initializeOrUpdateVault,
   wipeVaultStorage,
+  getStoredSovereignAddress,
 } from '../services/vaultService';
-import { useTheme } from '../theme/ThemeContext';
 import {
   ArrowLeft,
   Copy,
@@ -53,8 +53,6 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
   const [confirmPinInput, setConfirmPinInput] = useState('');
   const [pinSuccessMessage, setPinSuccessMessage] = useState('');
   const [showPinSetup, setShowPinSetup] = useState(false);
-
-  const { paletteId, setPaletteId, availablePalettes } = useTheme();
 
   if (!isOpen) return null;
 
@@ -335,6 +333,31 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                   {(wallet.type === 'custodial' ? (wallet.satsBalance || 0) : 0).toLocaleString()} Sats
                 </span>
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
+                  In-App Sovereign Address
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={wallet.nonCustodialAddress || getStoredSovereignAddress()}
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none pr-10 select-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(wallet.nonCustodialAddress || getStoredSovereignAddress());
+                      setCopiedAddr(true);
+                      setTimeout(() => setCopiedAddr(false), 2000);
+                    }}
+                    className="absolute right-3 top-3 text-[#9B97A2] hover:text-[#F8F0E7]"
+                  >
+                    {copiedAddr ? <Check className="w-3.5 h-3.5 text-[#D1B9B3]" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -416,27 +439,6 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
               <span>{validationError}</span>
             </div>
           )}
-
-          {/* Theme Palette Switcher */}
-          <div className="space-y-1.5 pt-1">
-            <span className="block text-xs font-semibold text-[#D1B9B3]">Theme Palette</span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              {availablePalettes.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPaletteId(p.id)}
-                  className={`py-2 px-2 rounded-xl border text-xs font-medium transition-all text-center ${
-                    paletteId === p.id
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2] hover:border-[#554653]'
-                  }`}
-                >
-                  {p.name.split(' ')[0]}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* Primary Action Button: Save / Connect */}
           <button

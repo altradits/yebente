@@ -5,14 +5,14 @@ const WALLET_STORAGE_KEY = 'altradits_user_wallet_v1';
 const TXS_STORAGE_KEY = 'altradits_transactions_v1';
 
 export const DEFAULT_WALLET: UserWallet = {
-  isConnected: false,
+  isConnected: true,
   type: 'custodial',
   satsBalance: 0,
   btcBalance: 0,
   mpesaBalanceKes: 0,
   telebirrBalanceEtb: 0,
   nonCustodialAddress: getStoredSovereignAddress(),
-  nonCustodialLabel: 'In-App Sovereign Address',
+  nonCustodialLabel: 'In-App Sovereign Vault',
   insertedAt: Date.now(),
 };
 
@@ -101,14 +101,6 @@ export function saveStoredTransactions(txs: Transaction[]): void {
   }
 }
 
-export function clearStoredTransactions(): Transaction[] {
-  try {
-    localStorage.removeItem(TXS_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-  return [];
-}
 
 export function getStoredWallet(): UserWallet {
   try {
@@ -117,8 +109,8 @@ export function getStoredWallet(): UserWallet {
 
     if (raw) {
       const parsed = JSON.parse(raw);
-      // If the wallet is disconnected or ejected, all balances must strictly be 0
-      if (!parsed || !parsed.isConnected) {
+      // If the wallet was explicitly disconnected or ejected, all balances must strictly be 0
+      if (!parsed || parsed.isConnected === false) {
         return { ...DISCONNECTED_WALLET };
       }
 
@@ -152,16 +144,33 @@ export function getStoredWallet(): UserWallet {
         ...parsed,
         isConnected: true,
         nonCustodialAddress: parsed.nonCustodialAddress || getStoredSovereignAddress(),
+        nonCustodialLabel: parsed.nonCustodialLabel || (parsed.type === 'custodial' ? 'In-App Sovereign Vault' : 'Self-Custody Key'),
         satsBalance: sats,
         btcBalance: sats / 100_000_000,
         mpesaBalanceKes: 0,
         telebirrBalanceEtb: 0,
       };
+    } else {
+      // First visit: establish initial in-app sovereign wallet
+      const initialSats = computeCustodialBalanceFromTransactions(validTxs);
+      const initialWallet: UserWallet = {
+        ...DEFAULT_WALLET,
+        isConnected: true,
+        type: 'custodial',
+        nonCustodialAddress: getStoredSovereignAddress(),
+        nonCustodialLabel: 'In-App Sovereign Vault',
+        satsBalance: initialSats,
+        btcBalance: initialSats / 100_000_000,
+        mpesaBalanceKes: 0,
+        telebirrBalanceEtb: 0,
+      };
+      saveStoredWallet(initialWallet);
+      return initialWallet;
     }
   } catch {
     // fallback
   }
-  return { ...DISCONNECTED_WALLET };
+  return { ...DEFAULT_WALLET, isConnected: true };
 }
 
 export function saveStoredWallet(wallet: UserWallet): void {

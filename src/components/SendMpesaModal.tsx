@@ -10,10 +10,14 @@ import {
   sendMpesaPayout,
   formatKenyanDisplayPhone,
   isValidKenyanPhone,
-  VerifyC2BResponse,
-  verifyC2BHakikisha,
 } from '../services/mpesaService';
+import {
+  sendTelebirrPayout,
+  formatEthiopianDisplayPhone,
+  isValidEthiopianPhone,
+} from '../services/telebirrService';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
+import { EthiopiaPhoneInput } from './EthiopiaPhoneInput';
 
 interface SendMpesaModalProps {
   isOpen: boolean;
@@ -30,81 +34,57 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   rates,
   onSuccess,
 }) => {
-  const [recipientType, setRecipientType] = useState<'phone' | 'till' | 'paybill'>('phone');
+  const [rail, setRail] = useState<'mpesa' | 'telebirr'>('mpesa');
+  const [amountMode, setAmountMode] = useState<'fiat' | 'sats'>('fiat');
   const [phone, setPhone] = useState<string>('');
-  const [tillNumber, setTillNumber] = useState<string>('');
-  const [paybillNumber, setPaybillNumber] = useState<string>('');
-  const [accountNumber, setAccountNumber] = useState<string>('');
-  const [amountStr, setAmountStr] = useState<string>('500');
+  const [fiatAmountStr, setFiatAmountStr] = useState<string>('500');
+  const [satsAmountStr, setSatsAmountStr] = useState<string>('');
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [realReference, setRealReference] = useState<string>('');
-  const [c2bVerified, setC2bVerified] = useState<VerifyC2BResponse | null>(null);
-  const [isVerifyingC2b, setIsVerifyingC2b] = useState(false);
-  const [c2bError, setC2bError] = useState<string>('');
-
-  const handleVerifyC2b = async () => {
-    const code = recipientType === 'till' ? tillNumber : paybillNumber;
-    if (!code.trim()) return;
-    setIsVerifyingC2b(true);
-    setC2bError('');
-    try {
-      const res = await verifyC2BHakikisha(
-        code,
-        recipientType === 'paybill' ? accountNumber : undefined
-      );
-      if (res.success && res.verified) {
-        setC2bVerified(res);
-      } else {
-        setC2bError(res.error || 'Could not verify merchant details via C2B Hakikisha.');
-      }
-    } catch {
-      setC2bError('Network error verifying merchant.');
-    } finally {
-      setIsVerifyingC2b(false);
-    }
-  };
 
   if (!isOpen) return null;
 
-  const numericAmount = parseFloat(amountStr) || 0;
+  const currentRate = rail === 'mpesa' ? rates.btcKes : rates.btcEtb;
+  const currencyCode = rail === 'mpesa' ? 'KES' : 'ETB';
+  const amountValue = parseFloat(amountMode === 'fiat' ? fiatAmountStr : satsAmountStr) || 0;
   const availableSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
 
-  const btcKesRate = rates.btcKes;
-  const satsRequired = btcKesRate > 0 ? Math.round((numericAmount / btcKesRate) * 100_000_000) : 0;
-  const satsFee = 250;
+  const numericAmount = amountMode === 'fiat'
+    ? amountValue
+    : currentRate > 0
+      ? Math.round((amountValue / 100_000_000) * currentRate)
+      : 0;
 
+  const satsRequired = currentRate > 0
+    ? amountMode === 'fiat'
+      ? Math.round((numericAmount / currentRate) * 100_000_000)
+      : Math.round(amountValue)
+    : 0;
+
+  const satsFee = 250;
   const isInsufficientSats = satsRequired + satsFee > availableSats;
 
-  const getRecipientDisplay = () => {
-    if (recipientType === 'phone') {
-      return formatKenyanDisplayPhone(phone);
-    }
-    if (recipientType === 'till') {
-      const nameTag = c2bVerified?.name ? ` (${c2bVerified.name})` : '';
-      return `Till No. ${tillNumber}${nameTag}`;
-    }
-    const nameTag = c2bVerified?.name ? ` (${c2bVerified.name})` : '';
-    return `Paybill ${paybillNumber} (Acc: ${accountNumber})${nameTag}`;
-  };
+  const getRecipientDisplay = () =>
+    rail === 'mpesa' ? formatKenyanDisplayPhone(phone) : formatEthiopianDisplayPhone(phone);
+
+  const isPhoneValid = rail === 'mpesa' ? isValidKenyanPhone(phone) : isValidEthiopianPhone(phone);
 
   const handleConfirm = async () => {
     if (numericAmount <= 0) return;
 
-    if (btcKesRate <= 0) {
-      setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats conversion.');
+    if (currentRate <= 0) {
+      setErrorMessage(`Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate ${currencyCode} payout.`);
       setStep('error');
       return;
     }
 
-    if (recipientType === 'phone') {
-      if (!phone || phone.length < 12) {
-        setErrorMessage('Please enter a valid 9-digit Kenyan phone number.');
-        setStep('error');
-        return;
-      }
-    } else {
-      setErrorMessage('Direct disbursement to Till and Paybill requires Safaricom B2B API credentials (MPESA_B2B_SHORTCODE). Only personal phone P2P transfers are currently supported.');
+    if (!isPhoneValid) {
+      setErrorMessage(
+        rail === 'mpesa'
+          ? 'Enter a valid Kenyan M-Pesa phone number: 07XXXXXXXX or 01XXXXXXXX.'
+          : 'Enter a valid Ethiopian Telebirr phone number: 09XXXXXXXX or 07XXXXXXXX.'
+      );
       setStep('error');
       return;
     }
@@ -119,47 +99,92 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
     setErrorMessage('');
 
     try {
-      const res = await sendMpesaPayout({
-        phone,
-        amount: numericAmount,
-        currency: 'KES',
-        satsAmount: satsRequired,
-        note: 'Sats to M-Pesa Transfer',
-      });
+      if (rail === 'mpesa') {
+        const res = await sendMpesaPayout({
+          phone,
+          amount: numericAmount,
+          currency: 'KES',
+          satsAmount: satsRequired,
+          note: 'Sats to M-Pesa Transfer',
+        });
 
-      if (!res.success) {
-        setErrorMessage(res.error || 'Failed to dispatch M-Pesa payment.');
-        setStep('error');
-        return;
+        if (!res.success) {
+          setErrorMessage(res.error || 'Failed to dispatch M-Pesa payment.');
+          setStep('error');
+          return;
+        }
+
+        if (!res.referenceNumber) {
+          setErrorMessage('M-Pesa payout succeeded but no Safaricom transaction reference number was returned.');
+          setStep('error');
+          return;
+        }
+
+        const refCode = res.referenceNumber;
+        setRealReference(refCode);
+
+        onSuccess({
+          type: 'send_mpesa',
+          title: `Send M-Pesa (${formatKenyanDisplayPhone(phone)})`,
+          status: 'completed',
+          fromCurrency: 'SATS',
+          fromAmount: satsRequired,
+          toCurrency: 'KES',
+          toAmount: numericAmount,
+          fee: satsFee,
+          feeCurrency: 'SATS',
+          rateUsed: currentRate,
+          recipient: getRecipientDisplay(),
+          referenceNumber: refCode,
+          walletType: wallet.type,
+          note: `M-Pesa payout to ${formatKenyanDisplayPhone(phone)}`,
+        });
+
+        setStep('success');
+      } else {
+        // Telebirr Payout
+        const res = await sendTelebirrPayout({
+          phone,
+          amount: numericAmount,
+          currency: 'ETB',
+          satsAmount: satsRequired,
+          note: 'Sats to Telebirr Transfer',
+        });
+
+        if (!res.success) {
+          setErrorMessage(res.error || 'Failed to dispatch Telebirr payment.');
+          setStep('error');
+          return;
+        }
+
+        if (!res.referenceNumber) {
+          setErrorMessage('Telebirr payout succeeded but no transaction reference was returned.');
+          setStep('error');
+          return;
+        }
+
+        const refCode = res.referenceNumber;
+        setRealReference(refCode);
+
+        onSuccess({
+          type: 'send_telebirr',
+          title: `Send Telebirr (${formatEthiopianDisplayPhone(phone)})`,
+          status: 'completed',
+          fromCurrency: 'SATS',
+          fromAmount: satsRequired,
+          toCurrency: 'ETB',
+          toAmount: numericAmount,
+          fee: satsFee,
+          feeCurrency: 'SATS',
+          rateUsed: currentRate,
+          recipient: getRecipientDisplay(),
+          referenceNumber: refCode,
+          walletType: wallet.type,
+          note: `Telebirr payout to ${formatEthiopianDisplayPhone(phone)}`,
+        });
+
+        setStep('success');
       }
-
-      if (!res.referenceNumber) {
-        setErrorMessage('M-Pesa payout succeeded but no Safaricom transaction reference number was returned.');
-        setStep('error');
-        return;
-      }
-
-      const refCode = res.referenceNumber;
-      setRealReference(refCode);
-
-      onSuccess({
-        type: 'send_mpesa',
-        title: `Sent Sats to M-Pesa (${formatKenyanDisplayPhone(phone)})`,
-        status: 'completed',
-        fromCurrency: 'SATS',
-        fromAmount: satsRequired,
-        toCurrency: 'KES',
-        toAmount: numericAmount,
-        fee: satsFee,
-        feeCurrency: 'SATS',
-        rateUsed: btcKesRate,
-        recipient: getRecipientDisplay(),
-        referenceNumber: refCode,
-        walletType: wallet.type,
-        note: `Sats cashout directly to ${formatKenyanDisplayPhone(phone)} on M-Pesa`,
-      });
-
-      setStep('success');
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Error processing transfer.');
       setStep('error');
@@ -181,6 +206,13 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
     handleResetAndClose();
   };
 
+  const headerTitle = rail === 'mpesa' ? 'Send M-Pesa' : 'Send Telebirr';
+  const ctaLabel = currentRate <= 0
+    ? 'Rates Unavailable'
+    : isInsufficientSats
+      ? 'Insufficient Sats Balance'
+      : headerTitle;
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#1D1627] border border-[#3A2D47] rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col max-h-[92vh]">
@@ -194,7 +226,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="text-base font-bold text-[#F8F0E7]">Send M-Pesa</h2>
+          <h2 className="text-base font-bold text-[#F8F0E7]">{headerTitle}</h2>
           <div className="w-8" aria-hidden="true" />
         </div>
 
@@ -202,172 +234,114 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <>
+              {/* Rail Selection */}
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select mobile network">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRail('mpesa');
+                    setPhone('');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    rail === 'mpesa'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  M-Pesa (KES)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRail('telebirr');
+                    setPhone('');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    rail === 'telebirr'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Telebirr (ETB)
+                </button>
+              </div>
+
               {/* Balance Display */}
               <div className="flex justify-between items-center px-1 text-xs">
                 <span className="text-[#9B97A2]">Available</span>
                 <span className="font-mono font-semibold text-[#D1B9B3]">
-                  {availableSats.toLocaleString()} Sats
+                  {availableSats.toLocaleString()} Sats (~{Math.round((availableSats / 100_000_000) * currentRate).toLocaleString()} {currencyCode})
                 </span>
               </div>
 
-              {/* Transfer Category */}
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRecipientType('phone')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    recipientType === 'phone'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  Phone
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecipientType('till')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    recipientType === 'till'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  Till
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecipientType('paybill')}
-                  className={`p-2 rounded-xl border text-xs font-medium transition-all ${
-                    recipientType === 'paybill'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  Paybill
-                </button>
-              </div>
-
-              {/* Recipient Input */}
-              {recipientType === 'phone' && (
+              {/* Phone Input */}
+              {rail === 'mpesa' ? (
                 <KenyaPhoneInput
                   value={phone}
                   onChange={(full) => setPhone(full)}
-                  label="Recipient Phone"
+                  label="M-Pesa Recipient Phone"
+                  ariaLabel="M-Pesa recipient phone"
+                />
+              ) : (
+                <EthiopiaPhoneInput
+                  value={phone}
+                  onChange={(full) => setPhone(full)}
+                  label="Telebirr Recipient Phone"
+                  ariaLabel="Telebirr recipient phone"
                 />
               )}
 
-              {recipientType === 'till' && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-[#D1B9B3]">
-                    Till Number
-                  </label>
-                  <input
-                    type="text"
-                    value={tillNumber}
-                    onChange={(e) => {
-                      setTillNumber(e.target.value);
-                      if (c2bVerified) setC2bVerified(null);
-                    }}
-                    placeholder="Till Number"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-sm font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                  <div className="flex items-center justify-between text-xs">
-                    <button
-                      type="button"
-                      onClick={handleVerifyC2b}
-                      disabled={isVerifyingC2b || !tillNumber.trim()}
-                      className="px-2.5 py-1 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-colors disabled:opacity-50"
-                    >
-                      {isVerifyingC2b ? 'Verifying...' : 'Verify'}
-                    </button>
-                    {c2bVerified && (
-                      <span className="font-mono text-emerald-400 font-semibold truncate max-w-[200px]">
-                        {c2bVerified.name}
-                      </span>
-                    )}
-                  </div>
-                  {c2bError && (
-                    <div className="text-xs font-mono text-[#946069]">
-                      {c2bError}
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Currency vs Sats toggle */}
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Amount entry mode">
+                <button
+                  type="button"
+                  onClick={() => setAmountMode('fiat')}
+                  aria-pressed={amountMode === 'fiat'}
+                  className={`h-10 rounded-xl border text-xs font-semibold transition-colors ${
+                    amountMode === 'fiat'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Enter {currencyCode}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAmountMode('sats')}
+                  aria-pressed={amountMode === 'sats'}
+                  className={`h-10 rounded-xl border text-xs font-semibold transition-colors ${
+                    amountMode === 'sats'
+                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+                  }`}
+                >
+                  Enter Sats
+                </button>
+              </div>
 
-              {recipientType === 'paybill' && (
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                        Business No.
-                      </label>
-                      <input
-                        type="text"
-                        value={paybillNumber}
-                        onChange={(e) => {
-                          setPaybillNumber(e.target.value);
-                          if (c2bVerified) setC2bVerified(null);
-                        }}
-                        placeholder="Business Number"
-                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-3 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-[#D1B9B3] mb-1">
-                        Account No.
-                      </label>
-                      <input
-                        type="text"
-                        value={accountNumber}
-                        onChange={(e) => {
-                          setAccountNumber(e.target.value);
-                          if (c2bVerified) setC2bVerified(null);
-                        }}
-                        placeholder="Account Number"
-                        className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-3 py-2 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <button
-                      type="button"
-                      onClick={handleVerifyC2b}
-                      disabled={isVerifyingC2b || !paybillNumber.trim()}
-                      className="px-2.5 py-1 rounded-xl bg-[#231A2D] border border-[#3C2E49] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-colors disabled:opacity-50"
-                    >
-                      {isVerifyingC2b ? 'Verifying...' : 'Verify'}
-                    </button>
-                    {c2bVerified && (
-                      <span className="font-mono text-emerald-400 font-semibold truncate max-w-[200px]">
-                        {c2bVerified.name}
-                      </span>
-                    )}
-                  </div>
-                  {c2bError && (
-                    <div className="text-xs font-mono text-[#946069]">
-                      {c2bError}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Amount to send */}
+              {/* Amount to cash out */}
               <div>
                 <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Amount (KES)
+                  {amountMode === 'fiat' ? `${headerTitle} amount` : 'Sats to send'}
                 </label>
                 <div className="relative">
                   <input
                     type="number"
-                    value={amountStr}
-                    onChange={(e) => setAmountStr(e.target.value)}
+                    value={amountMode === 'fiat' ? fiatAmountStr : satsAmountStr}
+                    onChange={(e) => {
+                      if (amountMode === 'fiat') {
+                        setFiatAmountStr(e.target.value);
+                      } else {
+                        setSatsAmountStr(e.target.value);
+                      }
+                    }}
                     onWheel={(e) => e.currentTarget.blur()}
                     placeholder="0"
                     min="1"
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-3 text-lg font-mono font-bold text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
                   <span className="absolute right-4 top-3.5 font-mono text-sm font-semibold text-[#D1B9B3]">
-                    KES
+                    {amountMode === 'fiat' ? currencyCode : 'Sats'}
                   </span>
                 </div>
               </div>
@@ -375,10 +349,14 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
               {/* Summary */}
               <div className="space-y-1.5 px-1 font-mono text-xs">
                 <div className="flex justify-between items-center">
-                  <span className="text-[#9B97A2]">Total Sats</span>
+                  <span className="text-[#9B97A2]">Sats deducted</span>
                   <span className="font-bold text-[#F8F0E7]">
                     {(satsRequired + satsFee).toLocaleString()} Sats
                   </span>
+                </div>
+                <div className="flex justify-between items-center text-[#9B97A2]">
+                  <span>{rail === 'mpesa' ? 'M-Pesa payout' : 'Telebirr payout'}</span>
+                  <span>{numericAmount.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between items-center text-[#9B97A2]">
                   <span>Fee</span>
@@ -391,15 +369,14 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 type="button"
                 onClick={handleConfirm}
                 disabled={
-                  numericAmount <= 0 ||
-                  (recipientType === 'phone' && !isValidKenyanPhone(phone)) ||
-                  (recipientType === 'till' && !tillNumber.trim()) ||
-                  (recipientType === 'paybill' && (!paybillNumber.trim() || !accountNumber.trim())) ||
+                  amountValue <= 0 ||
+                  !isPhoneValid ||
+                  currentRate <= 0 ||
                   isInsufficientSats
                 }
                 className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 mt-2 shadow-md shadow-[#763698]/20"
               >
-                {isInsufficientSats ? 'Insufficient Sats Balance' : 'Send M-Pesa'}
+                {ctaLabel}
               </button>
             </>
           )}
@@ -410,7 +387,9 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 <Loader2 className="w-8 h-8 animate-spin" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Sending M-Pesa</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">
+                  {rail === 'mpesa' ? 'Sending M-Pesa' : 'Sending Telebirr'}
+                </h3>
               </div>
             </div>
           )}
@@ -440,13 +419,15 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
                 <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">M-Pesa Sent</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">
+                  {rail === 'mpesa' ? 'M-Pesa Sent' : 'Telebirr Sent'}
+                </h3>
               </div>
 
               <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Amount Sent</span>
-                  <span className="text-[#F8F0E7] font-bold">{numericAmount.toLocaleString()} KES</span>
+                  <span className="text-[#F8F0E7] font-bold">{numericAmount.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Recipient</span>

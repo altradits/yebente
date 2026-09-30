@@ -5,7 +5,6 @@ import {
   getStoredWallet,
   saveStoredWallet,
   getStoredTransactions,
-  clearStoredTransactions,
   addTransaction,
   ejectWallet,
   wipeWallet,
@@ -17,17 +16,12 @@ import { TransactionHistory } from './components/TransactionHistory';
 import { BuyBtcModal } from './components/BuyBtcModal';
 import { ReceiveBtcModal } from './components/ReceiveBtcModal';
 import { SendBtcModal } from './components/SendBtcModal';
-import { SellBtcModal } from './components/SellBtcModal';
 import { SendMpesaModal } from './components/SendMpesaModal';
-import { SendTelebirrModal } from './components/SendTelebirrModal';
 import { TransactionDetailModal } from './components/TransactionDetailModal';
 import { WalletSettingsModal } from './components/WalletSettingsModal';
-import { QrCodeModal } from './components/QrCodeModal';
-import { ArrowDownLeft, ArrowUpRight, Send, ArrowRight } from 'lucide-react';
 
 export default function App() {
   const [wallet, setWallet] = useState<UserWallet>(getStoredWallet);
-  const [showBalanceSection, setShowBalanceSection] = useState(wallet.isConnected);
   const [transactions, setTransactions] = useState<Transaction[]>(getStoredTransactions);
   const [rates, setRates] = useState<ExchangeRates>(
     () =>
@@ -51,9 +45,8 @@ export default function App() {
 
   // Modals
   const [activeModal, setActiveModal] = useState<
-    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'sell_btc' | 'send_mpesa' | 'send_telebirr' | 'wallet_settings' | 'qr_code'
+    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'send_mpesa' | 'wallet_settings'
   >('none');
-  const [qrInitialMode, setQrInitialMode] = useState<'receive' | 'send'>('receive');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
   // Load live rates
@@ -79,19 +72,16 @@ export default function App() {
   const handleUpdateWallet = (updated: UserWallet) => {
     setWallet(updated);
     saveStoredWallet(updated);
-    setShowBalanceSection(true);
   };
 
   const handleEjectWallet = () => {
     const ejected = ejectWallet(wallet);
     setWallet(ejected);
-    setShowBalanceSection(false);
   };
 
   const handleWipeWallet = () => {
     const wiped = wipeWallet();
     setWallet(wiped);
-    setShowBalanceSection(false);
   };
 
   const handleRequireWalletAction = (action: () => void) => {
@@ -106,17 +96,6 @@ export default function App() {
     const { updatedWallet, updatedTransactions } = addTransaction(txData, wallet);
     setWallet(updatedWallet);
     setTransactions(updatedTransactions);
-    setShowBalanceSection(true);
-  };
-
-  const handleClearHistory = () => {
-    const cleared = clearStoredTransactions();
-    setTransactions(cleared);
-    if (wallet.type === 'custodial') {
-      const updated = { ...wallet, satsBalance: 0, btcBalance: 0 };
-      setWallet(updated);
-      saveStoredWallet(updated);
-    }
   };
 
   return (
@@ -129,23 +108,16 @@ export default function App() {
             : 'max-w-2xl bg-[#16101D] flex flex-col min-h-screen'
         }`}
       >
-        {/* Top Bar with brand yebente and wallet mode */}
+        {/* Top Bar with brand yebente and settings */}
         <TopBar
           wallet={wallet}
           onOpenWalletSettings={() => setActiveModal('wallet_settings')}
-          onEjectWallet={handleEjectWallet}
           isFrameMode={isFrameMode}
           onToggleFrameMode={() => setIsFrameMode(!isFrameMode)}
-          showBalanceSection={showBalanceSection}
-          onToggleBalanceSection={() => setShowBalanceSection((prev) => !prev)}
-          onOpenQrCode={() => {
-            setQrInitialMode('receive');
-            setActiveModal('qr_code');
-          }}
         />
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-24">
+        <main className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-6">
           {ratesError && rates.btcUsd === 0 && (
             <div className="p-3 rounded-2xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs">
               <p className="font-semibold">Exchange Rates Offline</p>
@@ -153,87 +125,31 @@ export default function App() {
             </div>
           )}
 
-          {/* 1. Main Balance Portfolio Card (only rendered when connected AND navbar button clicked) */}
-          {wallet.isConnected && showBalanceSection && (
+          {/* 1. Main Balance Portfolio Card (visible whenever wallet is connected) */}
+          {wallet.isConnected && (
             <BalanceCard
               wallet={wallet}
               rates={rates}
               onOpenWalletSettings={() => setActiveModal('wallet_settings')}
               onUpdateWallet={handleUpdateWallet}
-              onEjectWallet={handleEjectWallet}
-              onClose={() => setShowBalanceSection(false)}
             />
           )}
 
-          {/* 2. Core Actions: Buy BTC, Receive BTC, Send BTC, Sell BTC, Send M-Pesa, Send Telebirr */}
+          {/* Core wallet and payment actions: 4 streamlined buttons */}
           <ActionGrid
             onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
-            onReceiveBtc={() => setActiveModal('receive_btc')}
-            onSendBtc={() => setActiveModal('send_btc')}
-            onSellBtc={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
-            onSendMpesa={() => setActiveModal('send_mpesa')}
-            onSendTelebirr={() => setActiveModal('send_telebirr')}
+            onSendMpesa={() => handleRequireWalletAction(() => setActiveModal('send_mpesa'))}
+            onReceiveBtc={() => handleRequireWalletAction(() => setActiveModal('receive_btc'))}
+            onSendBtc={() => handleRequireWalletAction(() => setActiveModal('send_btc'))}
           />
 
           {/* 3. Secure Transaction History */}
           <TransactionHistory
             transactions={transactions}
             onSelectTransaction={(tx) => setSelectedTx(tx)}
-            onClearHistory={handleClearHistory}
           />
         </main>
 
-        {/* Fixed Thumb-Zone Bottom Action Bar for rapid one-handed mobile use */}
-        <nav
-          aria-label="Quick operations"
-          className="sticky bottom-0 z-20 bg-[#16101D]/95 backdrop-blur-md border-t border-[#372A42] px-4 py-2.5"
-        >
-          <div className="grid grid-cols-4 gap-1.5 max-w-md mx-auto">
-            {/* Quick Buy */}
-            <button
-              onClick={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
-            >
-              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#763698]/60 flex items-center justify-center mb-1 transition-colors">
-                <ArrowDownLeft className="w-4 h-4 text-[#D1B9B3]" />
-              </div>
-              <span className="text-[10px] font-medium tracking-tight">Buy Sats</span>
-            </button>
-
-            {/* Quick Sell */}
-            <button
-              onClick={() => handleRequireWalletAction(() => setActiveModal('sell_btc'))}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
-            >
-              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#946069]/60 flex items-center justify-center mb-1 transition-colors">
-                <ArrowUpRight className="w-4 h-4 text-[#946069]" />
-              </div>
-              <span className="text-[10px] font-medium tracking-tight">Sell Sats</span>
-            </button>
-
-            {/* Quick M-Pesa */}
-            <button
-              onClick={() => setActiveModal('send_mpesa')}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
-            >
-              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#554653] flex items-center justify-center mb-1 transition-colors">
-                <Send className="w-3.5 h-3.5 text-[#D1B9B3]" />
-              </div>
-              <span className="text-[10px] font-medium tracking-tight">M-Pesa</span>
-            </button>
-
-            {/* Quick Telebirr */}
-            <button
-              onClick={() => setActiveModal('send_telebirr')}
-              className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl text-[#9B97A2] hover:text-[#D1B9B3] active:scale-95 transition-all group"
-            >
-              <div className="w-8 h-8 rounded-xl bg-[#22182B] border border-[#3C2E49] group-hover:border-[#554653] flex items-center justify-center mb-1 transition-colors">
-                <ArrowRight className="w-3.5 h-3.5 text-[#9B97A2]" />
-              </div>
-              <span className="text-[10px] font-medium tracking-tight">Telebirr</span>
-            </button>
-          </div>
-        </nav>
       </div>
 
       {/* Modals */}
@@ -257,15 +173,6 @@ export default function App() {
         isOpen={activeModal === 'send_btc'}
         onClose={() => setActiveModal('none')}
         wallet={wallet}
-        rates={rates}
-        onSuccess={handleTransactionSuccess}
-      />
-
-      <SellBtcModal
-        isOpen={activeModal === 'sell_btc'}
-        onClose={() => setActiveModal('none')}
-        wallet={wallet}
-        rates={rates}
         onSuccess={handleTransactionSuccess}
       />
 
@@ -274,13 +181,6 @@ export default function App() {
         onClose={() => setActiveModal('none')}
         wallet={wallet}
         rates={rates}
-        onSuccess={handleTransactionSuccess}
-      />
-
-      <SendTelebirrModal
-        isOpen={activeModal === 'send_telebirr'}
-        onClose={() => setActiveModal('none')}
-        wallet={wallet}
         onSuccess={handleTransactionSuccess}
       />
 
@@ -296,16 +196,6 @@ export default function App() {
         onUpdateWallet={handleUpdateWallet}
         onEjectWallet={handleEjectWallet}
         onWipeWallet={handleWipeWallet}
-      />
-
-      <QrCodeModal
-        isOpen={activeModal === 'qr_code'}
-        onClose={() => setActiveModal('none')}
-        wallet={wallet}
-        rates={rates}
-        initialMode={qrInitialMode}
-        onSuccess={handleTransactionSuccess}
-        onOpenWalletSettings={() => setActiveModal('wallet_settings')}
       />
     </div>
   );

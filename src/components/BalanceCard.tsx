@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates } from '../types';
-import { Eye, EyeOff, X, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { queryWebLNBalance, isLightningAddress } from '../services/lightningService';
 import { fetchBitcoinAddressBalance } from '../services/blockchainService';
 import { computeCustodialBalanceFromTransactions, getStoredTransactions } from '../services/storageService';
@@ -10,8 +10,6 @@ interface BalanceCardProps {
   rates: ExchangeRates;
   onOpenWalletSettings: () => void;
   onUpdateWallet?: (updated: UserWallet) => void;
-  onEjectWallet?: () => void;
-  onClose?: () => void;
 }
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
@@ -19,7 +17,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
   rates,
   onOpenWalletSettings,
   onUpdateWallet,
-  onClose,
 }) => {
   const [hideBalances, setHideBalances] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -133,16 +130,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
           >
             <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-[#763698]' : ''}`} />
           </button>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-[#9B97A2] hover:text-[#F8F0E7] hover:bg-[#261D32] transition-colors"
-              title="Close"
-              aria-label="Close"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
         </div>
       </div>
 

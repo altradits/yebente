@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserWallet, Transaction } from '../types';
-import { ArrowLeft, CheckCircle2, AlertCircle, Copy, Check, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { createDepositInvoice, checkInvoiceStatus } from '../services/lightningService';
+import {
+  createDepositInvoice,
+  checkInvoiceStatus,
+  createLightningInvoice,
+  isLightningAddress,
+  resolveLightningAddress,
+} from '../services/lightningService';
+import { isValidBitcoinAddress } from '../services/blockchainService';
 import { getStoredSovereignAddress } from '../services/vaultService';
 
 interface ReceiveBtcModalProps {
@@ -20,17 +27,14 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   onSuccess,
   onOpenWalletSettings,
 }) => {
-  const [rail, setRail] = useState<'lightning' | 'onchain'>('lightning');
+  const [rail, setRail] = useState<'onchain' | 'lightning'>('onchain');
   const [step, setStep] = useState<'input' | 'invoice' | 'success' | 'error'>('input');
   const [satsAmountStr, setSatsAmountStr] = useState<string>('1000');
   const [isGenerating, setIsGenerating] = useState(false);
   const [invoice, setInvoice] = useState<string>('');
-  const [paymentHash, setPaymentHash] = useState<string>('');
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [copiedInvoice, setCopiedInvoice] = useState(false);
-  const [isCheckingSettlement, setIsCheckingSettlement] = useState(false);
-  const [isNodeConfigured, setIsNodeConfigured] = useState(true);
   const [onChainQrUrl, setOnChainQrUrl] = useState<string>('');
   const [copiedOnChain, setCopiedOnChain] = useState(false);
 
@@ -38,8 +42,19 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
 
   const numericSats = parseInt(satsAmountStr, 10) || 0;
   const currentSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
+  const isCustodialWallet = wallet.type === 'custodial';
+  const configuredLightningAddress = !isCustodialWallet && isLightningAddress(wallet.nonCustodialAddress)
+    ? wallet.nonCustodialAddress
+    : '';
 
-  // Stop polling when the modal closes or unmounts.
+  const onChainAddress =
+    wallet.nonCustodialAddress &&
+    isValidBitcoinAddress(wallet.nonCustodialAddress) &&
+    !isLightningAddress(wallet.nonCustodialAddress)
+      ? wallet.nonCustodialAddress.trim()
+      : getStoredSovereignAddress();
+
+  // Stop polling when modal closes or unmounts
   useEffect(() => {
     if (!isOpen && pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -54,6 +69,27 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     };
   }, [isOpen]);
 
+  // Generate on-chain QR code whenever onChainAddress or requested amount changes
+  useEffect(() => {
+    if (!isOpen || !onChainAddress) {
+      setOnChainQrUrl('');
+      return;
+    }
+
+    const btcUri =
+      numericSats > 0
+        ? `bitcoin:${onChainAddress}?amount=${(numericSats / 100_000_000).toFixed(8)}`
+        : `bitcoin:${onChainAddress}`;
+
+    QRCode.toDataURL(btcUri, {
+      margin: 2,
+      width: 280,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    })
+      .then(setOnChainQrUrl)
+      .catch(() => setOnChainQrUrl(''));
+  }, [isOpen, onChainAddress, numericSats]);
+
   const handleBack = () => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -66,7 +102,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     }
   };
 
-  const handleCreateInvoice = async () => {
+  const handleCreateLightningInvoice = async () => {
     if (numericSats <= 0) {
       setErrorMessage('Please enter an amount of 1 satoshi or more.');
       return;
@@ -76,34 +112,54 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     setErrorMessage('');
 
     try {
-      const res = await createDepositInvoice(numericSats, 'YeBente Lightning Deposit');
+      let res: {
+        success: boolean;
+        invoice?: string;
+        paymentHash?: string;
+        error?: string;
+      };
+
+      if (configuredLightningAddress) {
+        const details = await resolveLightningAddress(configuredLightningAddress);
+        if (!details.success || !details.callbackUrl) {
+          setErrorMessage(details.error || 'Could not reach the Lightning address saved in Wallet Settings.');
+          setStep('error');
+          return;
+        }
+
+        const externalInvoice = await createLightningInvoice(
+          details.callbackUrl,
+          numericSats,
+          'YeBente Sats Deposit'
+        );
+        res = {
+          success: externalInvoice.success,
+          invoice: externalInvoice.invoice,
+          error: externalInvoice.error,
+        };
+      } else {
+        res = await createDepositInvoice(numericSats, 'YeBente Lightning Deposit');
+      }
 
       if (!res.success || !res.invoice) {
-        setIsNodeConfigured(Boolean(res.configured));
         setErrorMessage(
-          res.error || 'Failed to generate Lightning invoice. Ensure your Lightning node is configured in .env.'
+          res.error ||
+            'Lightning node is not configured. To accept inbound Lightning payments, configure LNBITS_URL in .env or link an external Lightning address in Settings.'
         );
         setStep('error');
         return;
       }
 
       setInvoice(res.invoice);
-      setPaymentHash(res.paymentHash || '');
-      setIsNodeConfigured(true);
 
-      // Generate a high-contrast QR code for wallet scanners.
       const qrData = await QRCode.toDataURL(res.invoice.toUpperCase(), {
         margin: 2,
         width: 280,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF',
-        },
+        color: { dark: '#000000', light: '#FFFFFF' },
       });
       setQrCodeUrl(qrData);
       setStep('invoice');
 
-      // Start polling for settlement
       if (res.paymentHash) {
         startPollingSettlement(res.paymentHash, numericSats);
       }
@@ -122,7 +178,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     }
 
     pollIntervalRef.current = setInterval(async () => {
-      setIsCheckingSettlement(true);
       try {
         const res = await checkInvoiceStatus(hash);
         if (res.paid || res.settled) {
@@ -132,9 +187,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
           triggerSuccess(hash, sats);
         }
       } catch {
-        // Silently continue polling on transient network hiccup
-      } finally {
-        setIsCheckingSettlement(false);
+        // Continue polling
       }
     }, 2500);
   };
@@ -164,34 +217,14 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     setTimeout(() => setCopiedInvoice(false), 2000);
   };
 
-  const onChainAddress =
-    wallet.nonCustodialAddress &&
-    !wallet.nonCustodialAddress.includes('@') &&
-    !wallet.nonCustodialAddress.toLowerCase().startsWith('lnbc')
-      ? wallet.nonCustodialAddress
-      : getStoredSovereignAddress();
-
-  useEffect(() => {
-    if (!onChainAddress) {
-      setOnChainQrUrl('');
-      return;
-    }
-    QRCode.toDataURL(`bitcoin:${onChainAddress}`, {
-      margin: 2,
-      width: 280,
-      color: { dark: '#000000', light: '#FFFFFF' },
-    })
-      .then(setOnChainQrUrl)
-      .catch(() => setOnChainQrUrl(''));
-  }, [onChainAddress]);
-
-  if (!isOpen) return null;
-
   const handleCopyOnChain = () => {
+    if (!onChainAddress) return;
     navigator.clipboard.writeText(onChainAddress);
     setCopiedOnChain(true);
     setTimeout(() => setCopiedOnChain(false), 2000);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -218,47 +251,87 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 overflow-y-auto space-y-4 text-xs">
+          {/* Rail Selector (Interactive Tab Selector) */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRail('onchain');
+                setStep('input');
+                setErrorMessage('');
+              }}
+              className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                rail === 'onchain'
+                  ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                  : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+              }`}
+            >
+              On-Chain (Layer 1)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRail('lightning');
+                setStep('input');
+                setErrorMessage('');
+              }}
+              className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                rail === 'lightning'
+                  ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
+                  : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
+              }`}
+            >
+              Lightning (L2)
+            </button>
+          </div>
+
+          {/* Current balance readout without button border */}
+          <div className="flex justify-between items-center px-1 text-xs">
+            <span className="text-[#9B97A2]">Current Balance</span>
+            <span className="font-mono font-bold text-[#F8F0E7]">
+              {currentSats.toLocaleString()} Sats
+            </span>
+          </div>
+
           {/* STEP 1: Input */}
           {step === 'input' && (
             <div className="space-y-4">
-              {/* Rail Selector: Lightning vs On-Chain */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRail('lightning')}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    rail === 'lightning'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  Lightning (L2)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRail('onchain')}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    rail === 'onchain'
-                      ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
-                      : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
-                  }`}
-                >
-                  On-Chain (Layer 1)
-                </button>
-              </div>
+              {/* ON-CHAIN FLOW */}
+              {rail === 'onchain' && (
+                <div className="space-y-4 flex flex-col items-center text-center">
+                  {onChainQrUrl && (
+                    <div className="p-3 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
+                      <img
+                        src={onChainQrUrl}
+                        alt="On-Chain Bitcoin Deposit QR Code"
+                        className="w-52 h-52 rounded-xl object-contain block"
+                      />
+                    </div>
+                  )}
 
-              {/* Current balance readout without button border */}
-              <div className="flex justify-between items-center px-1 text-xs">
-                <span className="text-[#9B97A2]">Current Balance</span>
-                <span className="font-mono font-bold text-[#F8F0E7]">
-                  {currentSats.toLocaleString()} Sats
-                </span>
-              </div>
+                  <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
+                    <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
+                      <span>On-Chain Deposit Address</span>
+                      <span className="font-mono text-[10px]">Native SegWit (bc1q)</span>
+                    </div>
+                    <div className="font-mono text-[11px] text-[#D1B9B3] break-all select-all leading-relaxed">
+                      {onChainAddress}
+                    </div>
+                  </div>
 
-              {/* Lightning Receive Flow */}
+                  <button
+                    type="button"
+                    onClick={handleCopyOnChain}
+                    className="w-full h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
+                  >
+                    {copiedOnChain ? 'Address Copied' : 'Copy Bitcoin Address'}
+                  </button>
+                </div>
+              )}
+
+              {/* LIGHTNING FLOW */}
               {rail === 'lightning' && (
                 <div className="space-y-4">
-                  {/* Sats amount input */}
                   <div>
                     <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
                       Sats to Receive
@@ -280,7 +353,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Quick Preset Buttons */}
+                  {/* Presets */}
                   <div className="grid grid-cols-6 gap-1.5">
                     {[1, 10, 100, 500, 1000, 5000].map((preset) => (
                       <button
@@ -298,10 +371,9 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                     ))}
                   </div>
 
-                  {/* Submit CTA Button */}
                   <button
                     type="button"
-                    onClick={handleCreateInvoice}
+                    onClick={handleCreateLightningInvoice}
                     disabled={numericSats <= 0 || isGenerating}
                     className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 shadow-md shadow-[#763698]/20"
                   >
@@ -309,72 +381,12 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                   </button>
                 </div>
               )}
-
-              {/* On-Chain Receive Flow */}
-              {rail === 'onchain' && (
-                <div className="space-y-4 flex flex-col items-center text-center">
-                  {onChainAddress ? (
-                    <>
-                      {onChainQrUrl && (
-                        <div className="p-3 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
-                          <img
-                            src={onChainQrUrl}
-                            alt="On-Chain Bitcoin Deposit QR Code"
-                            className="w-52 h-52 rounded-xl object-contain block"
-                          />
-                        </div>
-                      )}
-
-                      <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
-                        <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
-                          <span>On-Chain Deposit Address</span>
-                          <span className="font-mono text-[10px]">Layer 1</span>
-                        </div>
-                        <div className="font-mono text-[11px] text-[#D1B9B3] break-all select-all leading-relaxed">
-                          {onChainAddress}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleCopyOnChain}
-                        className="w-full h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
-                      >
-                        {copiedOnChain ? 'Address Copied' : 'Copy Bitcoin Address'}
-                      </button>
-
-                    </>
-                  ) : (
-                    <div className="w-full bg-[#140E1B] border border-[#382B44] p-4 rounded-2xl text-center space-y-2">
-                      <p className="text-xs font-semibold text-[#F8F0E7]">
-                        No Layer 1 Bitcoin Address Configured
-                      </p>
-                      <button
-                        type="button"
-                        onClick={onOpenWalletSettings}
-                        className="w-full h-10 rounded-xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs transition-colors"
-                      >
-                        Wallet Settings
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Error Message */}
-              {errorMessage && (
-                <div className="p-3 rounded-2xl bg-red-950/30 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                  <span>{errorMessage}</span>
-                </div>
-              )}
             </div>
           )}
 
-          {/* STEP 2: Invoice Display & Polling */}
+          {/* STEP 2: Lightning Invoice Display */}
           {step === 'invoice' && (
             <div className="space-y-4 flex flex-col items-center text-center">
-              {/* Requested Sats readout */}
               <div className="w-full flex justify-between items-center px-1 text-xs">
                 <span className="text-[#9B97A2]">Invoice Amount</span>
                 <span className="font-mono font-bold text-lg text-[#F8F0E7]">
@@ -382,7 +394,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </span>
               </div>
 
-              {/* High-contrast QR code for wallet scanners */}
               {qrCodeUrl && (
                 <div className="p-3.5 bg-white rounded-3xl shadow-xl border border-white/20 my-1">
                   <img
@@ -393,13 +404,13 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </div>
               )}
 
-              {/* Live Status indicator */}
               <div className="flex items-center gap-2 text-xs font-mono text-[#D1B9B3]">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-[#763698]" />
-                <span>Awaiting Lightning payment...</span>
+                <span>
+                  {isCustodialWallet ? 'Awaiting Lightning payment...' : 'Invoice ready for your configured wallet'}
+                </span>
               </div>
 
-              {/* Truncated Invoice String */}
               <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
                 <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
                   <span>Lightning Invoice</span>
@@ -410,7 +421,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons: Copy Invoice */}
               <button
                 type="button"
                 onClick={handleCopyInvoice}
@@ -475,13 +485,29 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setStep('input')}
-                className="w-full h-12 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
-              >
-                Try Again
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRail('onchain');
+                    setStep('input');
+                    setErrorMessage('');
+                  }}
+                  className="flex-1 h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
+                >
+                  Receive On-Chain
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenWalletSettings();
+                  }}
+                  className="flex-1 h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
+                >
+                  Wallet Settings
+                </button>
+              </div>
             </div>
           )}
         </div>

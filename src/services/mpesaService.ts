@@ -336,3 +336,28 @@ export async function sendMpesaPayout(params: SendPayoutParams): Promise<SendPay
   }
 }
 
+/**
+ * Simulates a successful STK Push callback on the local bridge when running against Safaricom Sandbox
+ */
+export async function simulateSandboxStkSuccess(
+  checkoutRequestId: string,
+  amount?: number,
+  phone?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch('/api/mpesa/sandbox/simulate-stk-success', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkoutRequestId, amount, phone }),
+    });
+    const data = await response.json();
+    return { success: response.ok && Boolean(data.success), error: data.error };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Network error simulating callback.',
+    };
+  }
+}
+
+

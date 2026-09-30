@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserWallet, Transaction, ExchangeRates } from '../types';
+import { UserWallet, Transaction } from '../types';
 import { ArrowLeft, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import {
   isLightningAddress,
@@ -13,7 +13,6 @@ interface SendBtcModalProps {
   isOpen: boolean;
   onClose: () => void;
   wallet: UserWallet;
-  rates: ExchangeRates;
   onSuccess: (tx: Omit<Transaction, 'id' | 'timestamp'>) => void;
 }
 
@@ -21,7 +20,6 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
   isOpen,
   onClose,
   wallet,
-  rates,
   onSuccess,
 }) => {
   const [recipient, setRecipient] = useState<string>('');

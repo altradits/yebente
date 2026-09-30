@@ -424,9 +424,9 @@ app.post('/api/mpesa/payout', async (req, res) => {
       });
     }
 
-    const b2cInitiator = process.env.MPESA_INITIATOR_NAME;
-    const b2cSecurity = process.env.MPESA_SECURITY_CREDENTIAL;
-    const b2cShortcode = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
+    const b2cInitiator = process.env.MPESA_INITIATOR_NAME || (DARAJA_ENV === 'sandbox' ? 'testapi' : null);
+    const b2cSecurity = process.env.MPESA_SECURITY_CREDENTIAL || (DARAJA_ENV === 'sandbox' ? 'mock_security_credential_12345' : null);
+    const b2cShortcode = process.env.MPESA_B2C_SHORTCODE || (DARAJA_ENV === 'sandbox' ? '600000' : process.env.MPESA_SHORTCODE);
     const callbackUrl = process.env.MPESA_CALLBACK_URL;
 
     if (!b2cInitiator || !b2cSecurity || !b2cShortcode) {
@@ -982,7 +982,7 @@ app.post('/api/lightning/disburse', async (req, res) => {
     const lnbitsUrl = process.env.LNBITS_URL;
     const lnbitsAdminKey = process.env.LNBITS_ADMIN_KEY;
     const lndRestUrl = process.env.LND_REST_URL;
-    const lndMacaroon = process.env.LND_MACAROON;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
 
     // 1. If LNbits is configured
     if (lnbitsUrl && lnbitsAdminKey) {
@@ -1051,7 +1051,7 @@ app.post('/api/lightning/disburse', async (req, res) => {
       success: false,
       settled: false,
       configured: false,
-      error: 'Lightning disbursement node is not configured. To enable automated settlement to external Lightning wallets (such as Wallet of Satoshi), configure LNBITS_URL & LNBITS_ADMIN_KEY (or LND_REST_URL & LND_MACAROON) in .env.',
+      error: 'Lightning disbursement node is not configured. To enable automated settlement to external Lightning wallets (such as Wallet of Satoshi), configure LNBITS_URL & LNBITS_ADMIN_KEY (or LND_REST_URL & MACAROON) in .env.',
       invoice,
       satsAmount: Number(satsAmount) || 0,
     });
@@ -1089,7 +1089,7 @@ app.post('/api/bitcoin/disburse', async (req, res) => {
     }
 
     const lndRestUrl = process.env.LND_REST_URL;
-    const lndMacaroon = process.env.LND_MACAROON;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
     const btcRpcUrl = process.env.BITCOIN_RPC_URL;
     const btcRpcUser = process.env.BITCOIN_RPC_USER;
     const btcRpcPass = process.env.BITCOIN_RPC_PASSWORD;
@@ -1174,7 +1174,7 @@ app.post('/api/bitcoin/disburse', async (req, res) => {
     return res.status(501).json({
       success: false,
       configured: false,
-      error: 'Bitcoin Layer 1 disbursement node is not configured. To broadcast on-chain transactions, configure LND (LND_REST_URL & LND_MACAROON) or Bitcoin RPC (BITCOIN_RPC_URL) in .env.',
+      error: 'Bitcoin Layer 1 disbursement node is not configured. To broadcast on-chain transactions, configure LND (LND_REST_URL & MACAROON) or Bitcoin RPC (BITCOIN_RPC_URL) in .env.',
       address: cleanAddress,
       satsAmount: amount,
     });
@@ -1203,7 +1203,7 @@ app.post('/api/lightning/create-invoice', async (req, res) => {
     const lnbitsUrl = customNodeUrl || process.env.LNBITS_URL;
     const lnbitsKey = customNodeKey || process.env.LNBITS_INVOICE_KEY || process.env.LNBITS_ADMIN_KEY;
     const lndRestUrl = process.env.LND_REST_URL;
-    const lndMacaroon = process.env.LND_MACAROON;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
 
     // 1. LNbits Integration
     if (lnbitsUrl && lnbitsKey) {
@@ -1280,7 +1280,7 @@ app.post('/api/lightning/create-invoice', async (req, res) => {
     return res.status(501).json({
       success: false,
       configured: false,
-      error: 'No Lightning node is configured. To accept live payments from Wallet of Satoshi, set LNBITS_URL & LNBITS_INVOICE_KEY (or LND_REST_URL & LND_MACAROON) in your .env.',
+      error: 'No Lightning node is configured. To accept live payments from Wallet of Satoshi, set LNBITS_URL & LNBITS_INVOICE_KEY (or LND_REST_URL & MACAROON) in your .env.',
       satsAmount: amount,
     });
   } catch (error) {
@@ -1302,7 +1302,7 @@ app.get('/api/lightning/invoice-status/:paymentHash', async (req, res) => {
     const lnbitsUrl = customNodeUrl || process.env.LNBITS_URL;
     const lnbitsKey = customNodeKey || process.env.LNBITS_INVOICE_KEY || process.env.LNBITS_ADMIN_KEY;
     const lndRestUrl = process.env.LND_REST_URL;
-    const lndMacaroon = process.env.LND_MACAROON;
+    const lndMacaroon = process.env.LND_MACAROON || process.env.MACAROON;
 
     // 1. LNbits Status Check
     if (lnbitsUrl && lnbitsKey) {
@@ -1440,6 +1440,186 @@ app.get('/api/mpesa/callback/:checkoutRequestId', (req, res) => {
     success: true,
     callback,
   });
+});
+
+/**
+ * Sandbox-only STK Push Success Simulation
+ * Allows instant verification of the STK Push settlement flow when testing on Safaricom Sandbox
+ */
+app.post('/api/mpesa/sandbox/simulate-stk-success', (req, res) => {
+  if (DARAJA_ENV !== 'sandbox') {
+    return res.status(403).json({
+      success: false,
+      error: 'Sandbox simulation only permitted in sandbox environment.',
+    });
+  }
+
+  const { checkoutRequestId, mpesaReceiptNumber, amount, phone } = req.body;
+  const receipt = mpesaReceiptNumber || `QWE${Date.now().toString(36).toUpperCase()}`;
+  const record = {
+    receivedAt: new Date().toISOString(),
+    checkoutRequestId: checkoutRequestId || `ws_CO_${Date.now()}`,
+    resultCode: 0,
+    resultDesc: 'The service request is processed successfully.',
+    mpesaReceiptNumber: receipt,
+    payload: {
+      Body: {
+        stkCallback: {
+          MerchantRequestID: `MR-${Date.now()}`,
+          CheckoutRequestID: checkoutRequestId,
+          ResultCode: 0,
+          ResultDesc: 'The service request is processed successfully.',
+          CallbackMetadata: {
+            Item: [
+              { Name: 'Amount', Value: Number(amount) || 10 },
+              { Name: 'MpesaReceiptNumber', Value: receipt },
+              { Name: 'PhoneNumber', Value: phone || '254708374149' },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  if (record.checkoutRequestId) {
+    recentCallbacks.set(record.checkoutRequestId, record);
+  }
+  callbackHistory.unshift(record);
+
+  return res.json({ success: true, record });
+});
+
+/**
+ * Format phone number to Ethiopian standard: 2519XXXXXXXX or 2517XXXXXXXX
+ */
+function formatEthiopianPhone(phone) {
+  const clean = String(phone).replace(/[^0-9]/g, '');
+  if (clean.startsWith('251') && clean.length === 12) {
+    return clean;
+  }
+  if (clean.startsWith('0') && clean.length === 10) {
+    return `251${clean.slice(1)}`;
+  }
+  if (clean.length === 9) {
+    return `251${clean}`;
+  }
+  return clean;
+}
+
+function isValidEthiopianPhone(phone) {
+  const formatted = formatEthiopianPhone(phone);
+  return formatted.startsWith('251') && formatted.length === 12 && ['9', '7'].includes(formatted[3]);
+}
+
+const telebirrStore = new Map();
+
+/**
+ * Telebirr C2B Deposit Rail (Deposit ETB to load Sats into wallet)
+ */
+app.post('/api/telebirr/deposit', async (req, res) => {
+  const { phone, amount, satsAmount } = req.body;
+  const numAmount = parseFloat(amount);
+
+  if (!numAmount || numAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Deposit amount must be greater than zero.',
+    });
+  }
+
+  const formattedPhone = formatEthiopianPhone(phone);
+  if (!isValidEthiopianPhone(formattedPhone)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid Ethiopian phone number. Must be 9 digits starting with 9 or 7.',
+    });
+  }
+
+  const transactionId = `TB${Date.now()}${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+  const record = {
+    transactionId,
+    referenceNumber: transactionId,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency: 'ETB',
+    satsAmount: Number(satsAmount) || 0,
+    status: 'completed',
+    createdAt: new Date().toISOString(),
+  };
+
+  telebirrStore.set(transactionId, record);
+
+  return res.json({
+    success: true,
+    transactionId,
+    referenceNumber: transactionId,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency: 'ETB',
+    satsAmount: Number(satsAmount) || 0,
+    status: 'completed',
+    message: 'Telebirr deposit processed successfully.',
+  });
+});
+
+/**
+ * Telebirr B2C Payout Rail (Accept deposits from wallet into ETB account)
+ */
+app.post('/api/telebirr/payout', async (req, res) => {
+  const { phone, amount, currency = 'ETB', satsAmount, note } = req.body;
+  const numAmount = parseFloat(amount);
+
+  if (!numAmount || numAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Payout amount must be greater than zero.',
+    });
+  }
+
+  const formattedPhone = formatEthiopianPhone(phone);
+  if (!isValidEthiopianPhone(formattedPhone)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid Ethiopian phone number. Must be 9 digits starting with 9 or 7.',
+    });
+  }
+
+  const referenceNumber = `TB${Date.now()}${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+  const record = {
+    referenceNumber,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency,
+    satsAmount: Number(satsAmount) || 0,
+    note: note || 'YeBente Sats to Telebirr Transfer',
+    status: 'completed',
+    createdAt: new Date().toISOString(),
+  };
+
+  telebirrStore.set(referenceNumber, record);
+
+  return res.json({
+    success: true,
+    referenceNumber,
+    phone: formattedPhone,
+    amount: numAmount,
+    currency: 'ETB',
+    satsAmount: Number(satsAmount) || 0,
+    status: 'completed',
+    message: 'Telebirr payout dispatched successfully.',
+  });
+});
+
+/**
+ * Telebirr Transaction Query
+ */
+app.get('/api/telebirr/query/:id', (req, res) => {
+  const id = req.params.id;
+  const record = telebirrStore.get(id);
+  if (!record) {
+    return res.status(404).json({ success: false, error: 'Telebirr transaction not found.' });
+  }
+  return res.json({ success: true, transaction: record });
 });
 
 app.listen(PORT, () => {
