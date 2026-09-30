@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 dotenv.config({ override: true });
@@ -1628,6 +1629,7 @@ app.get('/api/telebirr/query/:id', (req, res) => {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, 'dist');
+const indexPath = path.join(distPath, 'index.html');
 
 app.use(express.static(distPath));
 
@@ -1636,10 +1638,31 @@ app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     return next();
   }
-  res.sendFile(path.join(distPath, 'index.html'));
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  res.status(200).send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ye₿ente</title>
+    <style>
+      body { background: #120E16; color: #F8F0E7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+      h1 { color: #763698; font-size: 2.2rem; margin-bottom: 0.5rem; letter-spacing: -0.03em; }
+      p { color: #D1B9B3; font-size: 0.95rem; margin: 0.3rem 0; }
+      a { color: #34D399; text-decoration: none; margin-top: 1rem; display: inline-block; font-family: monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>ye₿ente</h1>
+    <p>Backend bridge is live and operational.</p>
+    <p>Assets are compiling...</p>
+    <a href="/api/health">Verify /api/health</a>
+  </body>
+</html>`);
 });
 
-app.listen(PORT, () => {
-  console.log(`yebente Daraja bridge running on port ${PORT} [${DARAJA_ENV}]`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`yebente Daraja bridge running on 0.0.0.0:${PORT} [${DARAJA_ENV}]`);
 });
 
