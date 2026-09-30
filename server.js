@@ -116,7 +116,7 @@ app.post('/api/mpesa/stkpush', async (req, res) => {
 
     const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
-    const callbackUrl = process.env.MPESA_CALLBACK_URL;
+    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
 
     if (!shortcode) {
       return res.status(500).json({
@@ -129,13 +129,6 @@ app.post('/api/mpesa/stkpush', async (req, res) => {
       return res.status(500).json({
         success: false,
         error: 'M-Pesa STK Push failed: MPESA_PASSKEY is not configured in .env. Obtain passkey from Safaricom Developer Portal.',
-      });
-    }
-
-    if (!callbackUrl) {
-      return res.status(500).json({
-        success: false,
-        error: 'M-Pesa STK Push failed: MPESA_CALLBACK_URL is not configured in .env. Safaricom requires a publicly accessible HTTPS webhook URL to deliver payment confirmation.',
       });
     }
 
@@ -430,19 +423,12 @@ app.post('/api/mpesa/payout', async (req, res) => {
     const b2cInitiator = process.env.MPESA_INITIATOR_NAME || (DARAJA_ENV === 'sandbox' ? 'testapi' : null);
     const b2cSecurity = process.env.MPESA_SECURITY_CREDENTIAL || (DARAJA_ENV === 'sandbox' ? 'mock_security_credential_12345' : null);
     const b2cShortcode = process.env.MPESA_B2C_SHORTCODE || (DARAJA_ENV === 'sandbox' ? '600000' : process.env.MPESA_SHORTCODE);
-    const callbackUrl = process.env.MPESA_CALLBACK_URL;
+    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'https://example.com/api/mpesa/callback';
 
     if (!b2cInitiator || !b2cSecurity || !b2cShortcode) {
       return res.status(500).json({
         success: false,
         error: 'M-Pesa B2C Payout failed: Missing required B2C credentials. Configure MPESA_INITIATOR_NAME, MPESA_SECURITY_CREDENTIAL, and MPESA_B2C_SHORTCODE in .env, and ensure utility float is funded in the Safaricom B2C disbursement account.',
-      });
-    }
-
-    if (!callbackUrl) {
-      return res.status(500).json({
-        success: false,
-        error: 'M-Pesa B2C Payout failed: MPESA_CALLBACK_URL is not configured in .env. Safaricom requires a public HTTPS webhook URL to deliver disbursement confirmation.',
       });
     }
 

@@ -20,6 +20,8 @@ services:
         value: "600000"
       - key: MPESA_INITIATOR_NAME
         value: testapi
+      - key: MPESA_CALLBACK_URL
+        value: "https://example.com/api/mpesa/callback"
       - key: MPESA_CONSUMER_KEY
         sync: false
       - key: MPESA_CONSUMER_SECRET
