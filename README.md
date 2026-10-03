@@ -2,6 +2,13 @@
 
 **Hard Money for the African Household.**
 
+[![Live App](https://img.shields.io/badge/Live%20App-yebente.onrender.com-763698?style=flat&logo=render)](https://yebente.onrender.com)
+[![Status](https://img.shields.io/badge/Status-Live-emerald)](https://yebente.onrender.com/api/health)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+* **Live Web Application:** [https://yebente.onrender.com](https://yebente.onrender.com)
+* **Health & API Gateway:** [https://yebente.onrender.com/api/health](https://yebente.onrender.com/api/health)
+
 Ye₿ente is an open, sovereign financial settlement interface connecting Bitcoin (Satoshis) directly to East African mobile money networks: Safaricom M-Pesa in Kenya and Ethio Telecom Telebirr in Ethiopia.
 
 We are not here to build another extractive financial intermediary. We are here for monetary liberation. Starting in East Africa, Ye₿ente dismantles predatory cross-border remittance monopolies and currency debasement, giving everyday households direct, sovereign access to borderless digital bearer money.
@@ -100,6 +107,11 @@ npm run lint
 # Production build compilation
 npm run build
 ```
+
+### Production Deployment
+Ye₿ente is deployed continuously on Render via [render.yaml](render.yaml):
+* **Live Production Interface:** [https://yebente.onrender.com](https://yebente.onrender.com)
+* **API Health & Telecom Webhooks:** [https://yebente.onrender.com/api/health](https://yebente.onrender.com/api/health)
 
 ---
 
