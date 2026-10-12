@@ -1,85 +1,126 @@
 import React, { useState, useEffect } from 'react';
-import { UserWallet, Transaction } from '../types';
-import { ArrowLeft, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { UserWallet, Transaction, ExchangeRates } from '../types';
+import { ArrowLeft, CheckCircle2, AlertCircle, Loader2, WifiOff } from 'lucide-react';
 import {
   isLightningAddress,
   resolveLightningAddress,
   createLightningInvoice,
-  disburseBitcoinOnChain,
 } from '../services/lightningService';
-import { isValidBitcoinAddress, sanitizeBitcoinAddress } from '../services/blockchainService';
+import { calculateRealTransactionCost, RealTransactionCost } from '../services/blinkService';
+import { isNetworkOnline, queueOfflineTransaction } from '../services/offlineService';
 
 interface SendBtcModalProps {
   isOpen: boolean;
   onClose: () => void;
   wallet: UserWallet;
+  rates?: ExchangeRates;
   onSuccess: (tx: Omit<Transaction, 'id' | 'timestamp'>) => void;
+}
+
+function isOnChainAddress(input: string): boolean {
+  const clean = input.trim().replace(/^(bitcoin|lightning):/i, '');
+  const btcRegex = /^(bc1[a-z0-9]{25,90}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/i;
+  return btcRegex.test(clean);
+}
+
+function sanitizeLightningInput(input: string): string {
+  let clean = input.trim();
+  clean = clean.replace(/^(lightning):/i, '');
+  if (clean.includes('?')) {
+    clean = clean.split('?')[0];
+  }
+  return clean.trim();
 }
 
 export const SendBtcModal: React.FC<SendBtcModalProps> = ({
   isOpen,
   onClose,
   wallet,
+  rates,
   onSuccess,
 }) => {
   const [recipient, setRecipient] = useState<string>('');
   const [satsAmountStr, setSatsAmountStr] = useState<string>('1000');
   const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [isNetworkFailure, setIsNetworkFailure] = useState<boolean>(false);
   const [resolvedProvider, setResolvedProvider] = useState<string>('');
-  const [recipientType, setRecipientType] = useState<'unknown' | 'lightning_address' | 'lightning_invoice' | 'onchain'>('unknown');
+  const [recipientType, setRecipientType] = useState<'unknown' | 'lightning_address' | 'lightning_invoice' | 'invalid_onchain'>('unknown');
   const [isResolving, setIsResolving] = useState(false);
   const [resolvedCallback, setResolvedCallback] = useState<string>('');
   const [txReference, setTxReference] = useState<string>('');
+  const [realCost, setRealCost] = useState<RealTransactionCost>({
+    feeSats: 1,
+    feeFiat: 0.11,
+    feeFiatCurrency: 'KES',
+    source: 'blink',
+  });
+  const [wasOfflineDispatched, setWasOfflineDispatched] = useState<boolean>(false);
 
   const numericSats = parseInt(satsAmountStr, 10) || 0;
   const availableSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
+  const btcRate = rates?.btcKes || 11100000;
 
-  // Fee calculation: 10 Sats for Lightning, 500 Sats for On-Chain
-  const satsFee = recipientType === 'onchain' ? 500 : 10;
+  // Real fee dynamically tracked via Blink
+  const satsFee = realCost.feeSats;
   const totalDeducted = numericSats + satsFee;
   const isInsufficientSats = totalDeducted > availableSats;
+  const currentlyOnline = isNetworkOnline();
+
+  // Recalculate real transaction cost when amount changes
+  useEffect(() => {
+    calculateRealTransactionCost({
+      type: 'lightning',
+      satsAmount: numericSats,
+      btcRate,
+      currency: 'KES',
+      isOffChainLightningRoute: true,
+    }).then(setRealCost);
+  }, [numericSats, btcRate]);
 
   // Auto-detect and resolve recipient format on change
   useEffect(() => {
-    const clean = sanitizeBitcoinAddress(recipient);
+    const clean = sanitizeLightningInput(recipient);
     if (!clean) {
       setRecipientType('unknown');
       setResolvedProvider('');
       setResolvedCallback('');
+      setErrorMessage('');
+      return;
+    }
+
+    if (isOnChainAddress(clean)) {
+      setRecipientType('invalid_onchain');
+      setResolvedProvider('On-Chain Bitcoin (Unsupported)');
+      setResolvedCallback('');
+      setErrorMessage('On-chain Bitcoin addresses are not supported. Ye₿ente operates exclusively on Lightning. Please enter a Lightning Address (e.g. name@blink.sv) or a BOLT-11 invoice (lnbc...).');
       return;
     }
 
     if (clean.toLowerCase().startsWith('lnbc')) {
       setRecipientType('lightning_invoice');
       setResolvedProvider('Lightning Invoice (BOLT-11)');
+      setErrorMessage('');
       return;
     }
 
     if (isLightningAddress(clean)) {
       setRecipientType('lightning_address');
-      setIsResolving(true);
-      resolveLightningAddress(clean)
-        .then((res) => {
-          if (res.success) {
-            setResolvedProvider(res.provider || 'Lightning Address');
-            setResolvedCallback(res.callbackUrl || '');
-          } else {
-            setResolvedProvider('Unreachable Lightning Address');
-          }
-        })
-        .finally(() => setIsResolving(false));
-      return;
-    }
-
-    if (isValidBitcoinAddress(clean)) {
-      setRecipientType('onchain');
-      if (clean.startsWith('bc1p')) {
-        setResolvedProvider('Taproot (Layer 1)');
-      } else if (clean.startsWith('bc1q')) {
-        setResolvedProvider('Native SegWit (Layer 1)');
+      setErrorMessage('');
+      if (currentlyOnline) {
+        setIsResolving(true);
+        resolveLightningAddress(clean)
+          .then((res) => {
+            if (res.success) {
+              setResolvedProvider(res.provider || 'Lightning Address');
+              setResolvedCallback(res.callbackUrl || '');
+            } else {
+              setResolvedProvider('Lightning Address');
+            }
+          })
+          .finally(() => setIsResolving(false));
       } else {
-        setResolvedProvider('On-Chain Bitcoin (Layer 1)');
+        setResolvedProvider('Lightning Address (Offline Mode)');
       }
       return;
     }
@@ -87,7 +128,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
     setRecipientType('unknown');
     setResolvedProvider('');
     setResolvedCallback('');
-  }, [recipient]);
+  }, [recipient, currentlyOnline]);
 
   if (!isOpen) return null;
 
@@ -96,47 +137,103 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
     if (step === 'error') {
       setStep('input');
       setErrorMessage('');
+      setIsNetworkFailure(false);
     } else {
       onClose();
     }
   };
 
+  const executeOfflineQueue = (targetRecipient: string) => {
+    setWasOfflineDispatched(true);
+    const offlineTxData: Omit<Transaction, 'id' | 'timestamp'> = {
+      type: 'send_btc',
+      title: 'Sent Lightning Sats',
+      status: 'completed',
+      fromCurrency: 'SATS',
+      fromAmount: numericSats,
+      fee: satsFee,
+      feeCurrency: 'SATS',
+      realFeeSats: satsFee,
+      realFeeFiat: realCost.feeFiat,
+      realFeeCurrency: realCost.feeFiatCurrency,
+      feeRateSatPerVb: 0,
+      feeSource: 'blink',
+      recipient: targetRecipient,
+      referenceNumber: `OFFLINE-${Date.now().toString(36).toUpperCase()}`,
+      walletType: 'custodial',
+      note: `Offline dispatch to ${resolvedProvider || targetRecipient}`,
+      isOffline: true,
+      offlineStatus: 'queued',
+    };
+
+    const { queuedTx } = queueOfflineTransaction(offlineTxData, wallet);
+    setTxReference(queuedTx.referenceNumber);
+    setStep('success');
+  };
+
   const handleSend = async () => {
-    const cleanRecipient = sanitizeBitcoinAddress(recipient);
+    const cleanRecipient = sanitizeLightningInput(recipient);
     if (!cleanRecipient) {
-      setErrorMessage('Please enter a Lightning Address, BOLT-11 invoice, or Bitcoin address.');
+      setErrorMessage('Please enter a Lightning Address (e.g. name@blink.sv) or BOLT-11 invoice (lnbc...).');
+      setIsNetworkFailure(false);
+      return;
+    }
+
+    if (recipientType === 'invalid_onchain' || isOnChainAddress(cleanRecipient)) {
+      setErrorMessage('On-chain Bitcoin addresses are not supported. Ye₿ente operates exclusively on Lightning. Please enter a Lightning Address or a BOLT-11 invoice.');
+      setIsNetworkFailure(false);
+      return;
+    }
+
+    if (recipientType !== 'lightning_address' && recipientType !== 'lightning_invoice') {
+      setErrorMessage('Please enter a valid Lightning Address (e.g. user@blink.sv) or a BOLT-11 invoice (lnbc...).');
+      setIsNetworkFailure(false);
       return;
     }
 
     if (numericSats <= 0) {
       setErrorMessage('Please enter an amount of 1 satoshi or more.');
+      setIsNetworkFailure(false);
       return;
     }
 
     if (isInsufficientSats) {
       setErrorMessage(`Insufficient balance. Required: ${totalDeducted.toLocaleString()} Sats (including fee). Available: ${availableSats.toLocaleString()} Sats.`);
+      setIsNetworkFailure(false);
+      return;
+    }
+
+    // If device is strictly offline, immediately queue offline transaction
+    if (!isNetworkOnline()) {
+      executeOfflineQueue(cleanRecipient);
       return;
     }
 
     setStep('processing');
     setErrorMessage('');
+    setIsNetworkFailure(false);
 
     try {
       let finalInvoice = cleanRecipient;
 
       // 1. If recipient is a Lightning Address, generate invoice via callback
       if (recipientType === 'lightning_address' && resolvedCallback) {
-        const invRes = await createLightningInvoice(resolvedCallback, numericSats, 'Ye₿ente Payout');
-        if (!invRes.success || !invRes.invoice) {
-          setErrorMessage(invRes.error || 'Failed to generate invoice from recipient Lightning Address.');
+        try {
+          const invRes = await createLightningInvoice(resolvedCallback, numericSats, 'Ye₿ente Payout');
+          if (invRes.success && invRes.invoice) {
+            finalInvoice = invRes.invoice;
+          }
+        } catch {
+          // If network error resolving callback, fall back to offline queue
+          setIsNetworkFailure(true);
+          setErrorMessage('Could not reach recipient Lightning server. You can queue this transaction offline.');
           setStep('error');
           return;
         }
-        finalInvoice = invRes.invoice;
       }
 
-      // 2. Dispatch via Lightning Backend if Lightning
-      if (recipientType === 'lightning_address' || recipientType === 'lightning_invoice') {
+      // 2. Dispatch via Lightning Backend
+      try {
         const disburseRes = await fetch('/api/lightning/disburse', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -149,7 +246,6 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
 
         const disburseData = await disburseRes.json();
 
-        // If backend node is configured and routed successfully
         if (disburseRes.ok && disburseData.success) {
           const ref = disburseData.paymentHash || `LN-${Date.now().toString(36).toUpperCase()}`;
           setTxReference(ref);
@@ -157,57 +253,55 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
           return;
         }
 
+        // Node unconfigured or unreachable: offer offline queue
+        setIsNetworkFailure(true);
         setErrorMessage(
           disburseData.error ||
-          'Failed to route Lightning payment. Ensure your Lightning node (LNBITS_URL or LND) is configured in .env.'
+          'Lightning payment route unavailable. You can queue this transaction offline to broadcast upon reconnect.'
         );
         setStep('error');
         return;
-      }
-
-      // 3. If On-Chain Bitcoin Address
-      if (recipientType === 'onchain') {
-        const btcRes = await disburseBitcoinOnChain(cleanRecipient, numericSats, satsFee);
-        if (btcRes.success && (btcRes.txid || btcRes.referenceNumber)) {
-          const ref = btcRes.txid || btcRes.referenceNumber!;
-          setTxReference(ref);
-          completeTransaction(ref, cleanRecipient);
-          return;
-        }
-
-        setErrorMessage(
-          btcRes.error ||
-          'Failed to broadcast on-chain Bitcoin transaction. Ensure Bitcoin node credentials (LND or Bitcoin RPC) are configured in .env.'
-        );
+      } catch (fetchErr: unknown) {
+        setIsNetworkFailure(true);
+        setErrorMessage('Network error communicating with payment router. You can queue this transaction offline.');
         setStep('error');
         return;
       }
-
-      setErrorMessage('Unrecognized recipient address format. Enter a valid Lightning or Bitcoin address.');
-      setStep('error');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error dispatching payment';
+      setIsNetworkFailure(true);
       setErrorMessage(message);
       setStep('error');
     }
   };
 
   const completeTransaction = (ref: string, targetRecipient: string) => {
+    setWasOfflineDispatched(false);
     setStep('success');
     onSuccess({
       type: 'send_btc',
-      title: recipientType === 'onchain' ? 'Sent On-Chain Bitcoin' : 'Sent Lightning Sats',
+      title: 'Sent Lightning Sats',
       status: 'completed',
       fromCurrency: 'SATS',
       fromAmount: numericSats,
       fee: satsFee,
       feeCurrency: 'SATS',
+      realFeeSats: satsFee,
+      realFeeFiat: realCost.feeFiat,
+      realFeeCurrency: realCost.feeFiatCurrency,
+      feeRateSatPerVb: 0,
+      feeSource: 'blink',
       recipient: targetRecipient,
       referenceNumber: ref,
-      walletType: wallet.type,
+      walletType: 'custodial',
       note: `Dispatched to ${resolvedProvider || targetRecipient}`,
     });
   };
+
+  const isFormValid =
+    (recipientType === 'lightning_address' || recipientType === 'lightning_invoice') &&
+    numericSats > 0 &&
+    !isInsufficientSats;
 
   return (
     <div
@@ -228,13 +322,12 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="text-base font-bold text-[#F8F0E7]">Send Sats</h2>
+          <h2 className="text-base font-bold text-[#F8F0E7]">Send Lightning Sats</h2>
           <div className="w-8" aria-hidden="true" />
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 overflow-y-auto space-y-4 text-xs">
-          {/* STEP 1: Input */}
+        <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <div className="space-y-4">
               {/* Current balance readout without button box */}
@@ -245,17 +338,17 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                 </span>
               </div>
 
-              {/* Recipient Input (Lightning Address, Invoice, or Bitcoin Address) */}
+              {/* Recipient Input */}
               <div>
                 <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Recipient
+                  Lightning Destination
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     value={recipient}
                     onChange={(e) => setRecipient(e.target.value)}
-                    placeholder="user@walletofsatoshi.com, lnbc..., or bc1q..."
+                    placeholder="user@blink.sv, user@walletofsatoshi.com, or lnbc..."
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
                   {isResolving && (
@@ -267,7 +360,9 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
 
                 {/* Auto-detected Recipient Badge */}
                 {resolvedProvider && (
-                  <div className="flex items-center justify-between mt-1.5 px-1 text-[11px] font-mono text-emerald-400">
+                  <div className={`flex items-center justify-between mt-1.5 px-1 text-[11px] font-mono ${
+                    recipientType === 'invalid_onchain' ? 'text-red-400' : 'text-emerald-400'
+                  }`}>
                     <span>Detected Destination</span>
                     <span>{resolvedProvider}</span>
                   </div>
@@ -306,7 +401,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                 </div>
               </div>
 
-              {/* Quick Preset Buttons */}
+              {/* Presets */}
               <div className="grid grid-cols-4 gap-2">
                 {[500, 1000, 5000, 10000].map((preset) => (
                   <button
@@ -324,11 +419,13 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                 ))}
               </div>
 
-              {/* Fee and Total Readouts without button box */}
+              {/* Real Transaction Cost Readouts (borderless typographic rows) */}
               <div className="space-y-1.5 px-1 pt-1 text-xs">
                 <div className="flex justify-between items-center text-[#9B97A2]">
-                  <span>Network Fee</span>
-                  <span className="font-mono text-[#D1B9B3]">{satsFee.toLocaleString()} Sats</span>
+                  <span>Lightning Routing Fee</span>
+                  <span className="font-mono text-[#D1B9B3]">
+                    {satsFee.toLocaleString()} Sat (~{realCost.feeFiat} {realCost.feeFiatCurrency})
+                  </span>
                 </div>
                 <div className="flex justify-between items-center text-[#9B97A2]">
                   <span>Total Deducted</span>
@@ -348,7 +445,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={!recipient.trim() || numericSats <= 0 || isInsufficientSats}
+                disabled={!isFormValid}
                 className="w-full h-12 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-sm flex items-center justify-center transition-all disabled:opacity-50 shadow-md shadow-[#763698]/20"
               >
                 Send Sats
@@ -356,20 +453,20 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
             </div>
           )}
 
-          {/* STEP 2: Processing */}
           {step === 'processing' && (
-            <div className="py-8 text-center space-y-4">
-              <Loader2 className="w-10 h-10 animate-spin text-[#763698] mx-auto" />
+            <div className="py-8 flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-[#763698]/20 border border-[#763698]/40 flex items-center justify-center text-[#D1B9B3]">
+                <Loader2 className="w-8 h-8 animate-spin" />
+              </div>
               <div className="space-y-1">
-                <h3 className="text-base font-bold text-[#F8F0E7]">Routing Payment</h3>
-                <p className="text-xs text-[#9B97A2]">
-                  Dispatching {numericSats.toLocaleString()} Sats to {resolvedProvider || recipient}...
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Routing Lightning Payment</h3>
+                <p className="text-xs text-[#9B97A2] font-mono">
+                  Settling off-chain via Lightning Network...
                 </p>
               </div>
             </div>
           )}
 
-          {/* STEP 3: Success */}
           {step === 'success' && (
             <div className="text-center py-4 space-y-4">
               <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto">
@@ -377,9 +474,11 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
               </div>
 
               <div className="space-y-1">
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Sats Sent Successfully</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Payment Sent</h3>
                 <p className="text-xs text-[#9B97A2]">
-                  Dispatched to {resolvedProvider || recipient}.
+                  {wasOfflineDispatched
+                    ? 'Transaction recorded in local vault. Will sync automatically upon reconnect.'
+                    : `Dispatched to ${resolvedProvider || recipient}.`}
                 </p>
               </div>
 
@@ -391,9 +490,9 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-[#9B97A2]">Network Fee</span>
+                  <span className="text-xs text-[#9B97A2]">Routing Fee</span>
                   <span className="text-xs font-mono text-[#D1B9B3]">
-                    {satsFee.toLocaleString()} Sats
+                    {satsFee.toLocaleString()} Sat (~{realCost.feeFiat} {realCost.feeFiatCurrency})
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -402,6 +501,12 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                     {txReference}
                   </span>
                 </div>
+                {wasOfflineDispatched && (
+                  <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
+                    <span className="text-xs text-amber-400">Status</span>
+                    <span className="text-xs font-mono text-amber-300">Queued Offline</span>
+                  </div>
+                )}
               </div>
 
               <button
@@ -414,7 +519,6 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
             </div>
           )}
 
-          {/* STEP 4: Error */}
           {step === 'error' && (
             <div className="text-center py-4 space-y-4">
               <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 flex items-center justify-center mx-auto">
@@ -428,13 +532,30 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setStep('input')}
-                className="w-full h-12 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
-              >
-                Try Again
-              </button>
+              <div className="space-y-2">
+                {isNetworkFailure && (
+                  <button
+                    type="button"
+                    onClick={() => executeOfflineQueue(recipient)}
+                    className="w-full h-11 rounded-2xl bg-amber-600 hover:bg-amber-500 text-[#F8F0E7] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <WifiOff className="w-4 h-4" />
+                    <span>Queue Offline Settlement</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('input');
+                    setErrorMessage('');
+                    setIsNetworkFailure(false);
+                  }}
+                  className="w-full h-11 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
             </div>
           )}
         </div>

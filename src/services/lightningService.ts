@@ -8,6 +8,12 @@ export interface LightningAddressDetails {
   maxSendableSats: number;
   callbackUrl: string;
   commentAllowed: number;
+  currency?: {
+    code: string;
+    minSendable: number;
+    maxSendable: number;
+    multiplier: number;
+  };
   error?: string;
 }
 
@@ -58,12 +64,18 @@ export function decodeLnurl(lnurlStr: string): string | null {
   }
 }
 
+import { normalizeTandoPhone, isValidTandoPhone } from './tandoService';
+
 /**
- * Checks if input is a valid Lightning Address (user@domain.com) or encoded LNURL (lnurl1...)
+ * Checks if input is a valid Lightning Address (user@domain.com), encoded LNURL (lnurl1...),
+ * or a Kenyan phone number (which functions natively as a Tando Lightning address: <phone>@bitcoin.co.ke).
  */
 export function isLightningAddress(input: string): boolean {
   const clean = input.trim().toLowerCase().replace(/^lightning:/i, '');
   if (clean.startsWith('lnurl1')) {
+    return true;
+  }
+  if (isValidTandoPhone(clean)) {
     return true;
   }
   const lightningRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
@@ -71,13 +83,18 @@ export function isLightningAddress(input: string): boolean {
 }
 
 /**
- * Resolves a Lightning Address (such as user@walletofsatoshi.com or user@blink.sv)
+ * Resolves a Lightning Address (such as user@walletofsatoshi.com, user@blink.sv, or phone@bitcoin.co.ke)
  * via the LNURL-pay protocol (RFC-LNURL) to verify the wallet is authentic and active.
  */
 export async function resolveLightningAddress(
   address: string
 ): Promise<LightningAddressDetails> {
-  const clean = address.trim().toLowerCase().replace(/^lightning:/i, '');
+  let clean = address.trim().toLowerCase().replace(/^lightning:/i, '');
+
+  // If a Kenyan phone number is entered, normalize to Tando Lightning address
+  if (isValidTandoPhone(clean)) {
+    clean = `${normalizeTandoPhone(clean)}@bitcoin.co.ke`;
+  }
 
   let targetUrl: string;
   let defaultUsername = '';
@@ -177,6 +194,8 @@ export async function resolveLightningAddress(
       provider = 'Wallet of Satoshi';
     } else if (defaultDomain.includes('blink.sv')) {
       provider = 'Blink (Galoy)';
+    } else if (defaultDomain.includes('bitcoin.co.ke')) {
+      provider = 'Tando (M-Pesa)';
     } else if (defaultDomain.includes('getalby')) {
       provider = 'Alby';
     } else if (defaultDomain.includes('strike.me')) {
@@ -211,6 +230,15 @@ export async function resolveLightningAddress(
     const minSendableSats = Math.ceil((Number(data.minSendable) || 1000) / 1000);
     const maxSendableSats = Math.floor((Number(data.maxSendable) || 100000000000) / 1000);
 
+    const currencyData = data.currency
+      ? {
+          code: data.currency.code || 'KES',
+          minSendable: Number(data.currency.minSendable) || 15,
+          maxSendable: Number(data.currency.maxSendable) || 50000,
+          multiplier: Number(data.currency.multiplier) || 9000,
+        }
+      : undefined;
+
     return {
       success: true,
       address: standardAddress,
@@ -221,6 +249,7 @@ export async function resolveLightningAddress(
       maxSendableSats,
       callbackUrl: data.callback || '',
       commentAllowed: Number(data.commentAllowed) || 0,
+      currency: currencyData,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Network error';
@@ -246,7 +275,7 @@ export async function createLightningInvoice(
   callbackUrl: string,
   satsAmount: number,
   comment?: string
-): Promise<{ success: boolean; invoice?: string; error?: string }> {
+): Promise<{ success: boolean; invoice?: string; paymentHash?: string; receiptUrl?: string; error?: string }> {
   try {
     const millisats = Math.round(satsAmount * 1000);
     const url = new URL(callbackUrl);
@@ -265,9 +294,19 @@ export async function createLightningInvoice(
       };
     }
 
+    let paymentHash: string | undefined;
+    let receiptUrl: string | undefined;
+    if (data.successAction?.url) {
+      receiptUrl = data.successAction.url;
+      const parts = data.successAction.url.split('/');
+      paymentHash = parts[parts.length - 1];
+    }
+
     return {
       success: true,
       invoice: data.pr,
+      paymentHash,
+      receiptUrl,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to reach invoice generator';
@@ -407,62 +446,6 @@ export async function checkInvoiceStatus(
       success: false,
       settled: false,
       paid: false,
-      error: message,
-    };
-  }
-}
-
-export interface DisburseBitcoinResponse {
-  success: boolean;
-  configured?: boolean;
-  txid?: string;
-  referenceNumber?: string;
-  satsAmount?: number;
-  error?: string;
-}
-
-/**
- * Dispatches a Layer 1 on-chain Bitcoin transaction via Ye₿ente backend node.
- * Strictly queries node broadcaster. Zero mock or simulated figures.
- */
-export async function disburseBitcoinOnChain(
-  address: string,
-  satsAmount: number,
-  feeRate?: number
-): Promise<DisburseBitcoinResponse> {
-  try {
-    const res = await fetch('/api/bitcoin/disburse', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        address,
-        satsAmount,
-        feeRate,
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      return {
-        success: false,
-        configured: data.configured,
-        error: data.error || 'Failed to broadcast on-chain Bitcoin transaction.',
-      };
-    }
-
-    return {
-      success: true,
-      configured: true,
-      txid: data.txid,
-      referenceNumber: data.referenceNumber || data.txid,
-      satsAmount: data.satsAmount,
-    };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Network error broadcasting on-chain transaction.';
-    return {
-      success: false,
       error: message,
     };
   }

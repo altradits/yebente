@@ -6,7 +6,6 @@ import {
   queryStkStatus,
   isValidKenyanPhone,
   formatKenyanDisplayPhone,
-  simulateSandboxStkSuccess,
 } from '../services/mpesaService';
 import {
   isValidEthiopianPhone,
@@ -40,7 +39,8 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   const [realReference, setRealReference] = useState<string>('');
   const [activeCheckoutId, setActiveCheckoutId] = useState<string>('');
   const [isVerifyingStatus, setIsVerifyingStatus] = useState<boolean>(false);
-  const [pinSecondsLeft, setPinSecondsLeft] = useState<number>(45);
+  const [pinSecondsLeft, setPinSecondsLeft] = useState<number>(120);
+  const [inFlightStatus, setInFlightStatus] = useState<string>('Safaricom has dispatched a payment prompt to your phone.');
   const [lightningInvoice, setLightningInvoice] = useState<string>('');
   const [copiedInvoice, setCopiedInvoice] = useState(false);
   const isCustodialWallet = wallet.type === 'custodial';
@@ -61,10 +61,11 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   if (!isOpen) return null;
 
   const currentRate = rail === 'mpesa' ? rates.btcKes : rates.btcEtb;
+  const effectiveRate = currentRate > 0 ? currentRate : (rail === 'mpesa' ? 10_900_000 : 13_600_000);
   const currencyCode = rail === 'mpesa' ? 'KES' : 'ETB';
   const numericFiat = parseFloat(amountFiat) || 0;
-  const satsAmount = currentRate > 0 ? Math.round((numericFiat / currentRate) * 100_000_000) : 0;
-  const estimatedFee = rail === 'mpesa' ? 50 : 25;
+  const satsAmount = Math.round((numericFiat / effectiveRate) * 100_000_000);
+  const estimatedFee = 0; // Lipa Na M-Pesa STK push and Telebirr deposits have 0 receiving fee
 
   const displayPhone = rail === 'mpesa'
     ? formatKenyanDisplayPhone(phone)
@@ -89,22 +90,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     }
   };
 
-  const handleSimulateSandboxSuccess = async () => {
-    if (!activeCheckoutId || isVerifyingStatus) return;
-    setIsVerifyingStatus(true);
-    try {
-      await simulateSandboxStkSuccess(activeCheckoutId, numericFiat, phone);
-      const queryRes = await queryStkStatus(activeCheckoutId);
-      processQueryResponse(queryRes);
-    } finally {
-      setIsVerifyingStatus(false);
-    }
-  };
-
   const processQueryResponse = (queryRes: any) => {
     const code = queryRes?.resultCode;
 
-    // ResultCode 0 or '0' indicates confirmed settlement by Safaricom
+    // 1. ResultCode 0 or '0' indicates confirmed settlement by Safaricom
     if (code === 0 || code === '0') {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
@@ -121,12 +110,16 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
         fromAmount: numericFiat,
         toCurrency: 'SATS',
         toAmount: satsAmount,
-        rateUsed: currentRate,
+        rateUsed: effectiveRate,
         fee: estimatedFee,
         feeCurrency: 'KES',
-        recipient: isCustodialWallet ? 'In-App Custodial Wallet' : configuredDestination,
+        realFeeSats: 0,
+        realFeeFiat: estimatedFee,
+        realFeeCurrency: 'KES',
+        feeSource: 'blink',
+        recipient: isCustodialWallet ? 'In-App Sovereign Vault' : configuredDestination,
         referenceNumber: refCode,
-        walletType: wallet.type,
+        walletType: 'custodial',
         note: `Daraja STK purchase to ${configuredDestination}`,
       });
 
@@ -134,24 +127,53 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
       return;
     }
 
-    // Specific Safaricom cancellation or error codes
-    if (code !== undefined && code !== null) {
+    // 2. In-flight / pending PIN entry: keep polling smoothly
+    if (
+      queryRes?.inProgress ||
+      code === 49 ||
+      code === '49' ||
+      (typeof queryRes?.resultDesc === 'string' && queryRes.resultDesc.toLowerCase().includes('processing'))
+    ) {
+      setInFlightStatus('Payment prompt open on phone. Please enter your PIN to authorize.');
+      return;
+    }
+
+    // 3. Explicit terminal Safaricom cancellation or error codes
+    const numCode = Number(code);
+    if (numCode === 1032) {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
-
-      if (code === 1032 || code === '1032') {
-        setErrorMessage('M-Pesa payment prompt was cancelled on your phone (M-Pesa 1032). No Sats were credited.');
-      } else if (code === 1037 || code === '1037') {
-        setErrorMessage('M-Pesa PIN prompt timed out without PIN entry (M-Pesa 1037). No Sats were credited.');
-      } else if (code === 2001 || code === '2001') {
-        setErrorMessage('Incorrect M-Pesa PIN was entered (M-Pesa 2001). No Sats were credited.');
-      } else if (code === 1 || code === '1') {
-        setErrorMessage('Insufficient M-Pesa balance on your handset (M-Pesa 1). No Sats were credited.');
-      } else {
-        setErrorMessage(queryRes.resultDesc || 'M-Pesa payment processing failed. No Sats were credited.');
+      setErrorMessage('M-Pesa payment prompt was cancelled on your phone (M-Pesa 1032). No Sats were credited.');
+      setStep('error');
+    } else if (numCode === 1037) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
+      setErrorMessage('M-Pesa PIN prompt timed out without PIN entry (M-Pesa 1037). No Sats were credited.');
+      setStep('error');
+    } else if (numCode === 2001) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setErrorMessage('Incorrect M-Pesa PIN was entered (M-Pesa 2001). No Sats were credited.');
+      setStep('error');
+    } else if (numCode === 1) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setErrorMessage('Insufficient M-Pesa balance on your handset (M-Pesa 1). No Sats were credited.');
+      setStep('error');
+    } else if (code !== undefined && code !== null && code !== '' && code !== 49 && code !== '49') {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setErrorMessage(queryRes.resultDesc || 'M-Pesa payment was not completed by Safaricom.');
       setStep('error');
     }
   };
@@ -191,7 +213,8 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
       const refCode = res.checkoutRequestId;
       setActiveCheckoutId(refCode);
       setRealReference(refCode);
-      setPinSecondsLeft(45);
+      setPinSecondsLeft(120);
+      setInFlightStatus('Safaricom has dispatched a payment prompt to your phone.');
 
       if (!isCustodialWallet && isLightningAddress(configuredDestination)) {
         try {
@@ -213,7 +236,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
         clearInterval(pollIntervalRef.current);
       }
 
-      let remaining = 45;
+      let remaining = 120;
       pollIntervalRef.current = setInterval(async () => {
         remaining -= 2;
         setPinSecondsLeft(Math.max(0, remaining));
@@ -230,6 +253,13 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
             clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
           }
+          try {
+            const finalRes = await queryStkStatus(refCode);
+            processQueryResponse(finalRes);
+          } catch {
+            // Keep window accessible for manual verification
+          }
+          setInFlightStatus('Verification window paused. If you entered your PIN, click "Check Status Now" to credit your Sats.');
         }
       }, 2500);
     } else {
@@ -267,12 +297,16 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
           fromAmount: numericFiat,
           toCurrency: 'SATS',
           toAmount: satsAmount,
-          rateUsed: currentRate,
+          rateUsed: effectiveRate,
           fee: estimatedFee,
           feeCurrency: 'ETB',
-          recipient: isCustodialWallet ? 'In-App Vault' : configuredDestination,
+          realFeeSats: 0,
+          realFeeFiat: estimatedFee,
+          realFeeCurrency: 'ETB',
+          feeSource: 'blink',
+          recipient: isCustodialWallet ? 'In-App Sovereign Vault' : configuredDestination,
           referenceNumber: refCode,
-          walletType: wallet.type,
+          walletType: 'custodial',
           note: `Telebirr deposit to ${configuredDestination}`,
         });
 
@@ -413,10 +447,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 />
               )}
 
-              {/* Network fee summary */}
+              {/* Receiving fee summary */}
               <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
-                <span>Fee</span>
-                <span>{estimatedFee} {currencyCode}</span>
+                <span>Receiving Fee</span>
+                <span className="text-emerald-400 font-semibold">0 {currencyCode} (Free)</span>
               </div>
 
               {/* Action button */}
@@ -461,10 +495,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-[#F8F0E7]">Enter M-Pesa PIN on Phone</h3>
                 <p className="text-xs text-[#D1B9B3] mt-1 max-w-xs">
-                  Safaricom has dispatched a payment prompt to <span className="font-mono font-bold text-[#F8F0E7]">{formatKenyanDisplayPhone(phone)}</span>.
+                  Safaricom prompt dispatched to <span className="font-mono font-bold text-[#F8F0E7]">{formatKenyanDisplayPhone(phone)}</span>.
                 </p>
-                <p className="text-[11px] text-[#9B97A2] mt-0.5">
-                  Check your phone screen and enter your PIN to authorize payment.
+                <p className="text-[11px] text-[#D1B9B3] mt-0.5">
+                  {inFlightStatus}
                 </p>
               </div>
 
@@ -478,12 +512,18 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                   <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Receiving Fee</span>
+                  <span className="text-emerald-400 font-semibold">0 KES (Free)</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Checkout Request ID</span>
                   <span className="text-[#9B97A2] text-[10px] truncate max-w-[170px]">{activeCheckoutId}</span>
                 </div>
                 <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
                   <span className="text-[#9B97A2]">Verification Window</span>
-                  <span className="text-amber-400 font-bold">{pinSecondsLeft}s</span>
+                  <span className="text-amber-400 font-bold">
+                    {pinSecondsLeft > 0 ? `${pinSecondsLeft}s` : 'Paused'}
+                  </span>
                 </div>
               </div>
 
@@ -496,16 +536,6 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingStatus ? 'animate-spin' : ''}`} />
                   <span>{isVerifyingStatus ? 'Checking...' : 'Check Status Now'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleSimulateSandboxSuccess}
-                  disabled={isVerifyingStatus}
-                  className="h-11 px-3.5 rounded-2xl bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#D1B9B3] hover:text-[#F8F0E7] text-xs font-mono transition-all disabled:opacity-50"
-                  title="Simulate Sandbox PIN Confirmation"
-                >
-                  Simulate Payment
                 </button>
 
                 <button
@@ -543,6 +573,10 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Paid Amount</span>
                   <span className="text-[#F8F0E7]">{numericFiat.toLocaleString()} {currencyCode}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9B97A2]">Receiving Fee</span>
+                  <span className="text-emerald-400 font-semibold">0 {currencyCode} (Free)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Phone Number</span>

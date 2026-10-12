@@ -1,10 +1,11 @@
 import { ExchangeRates } from '../types';
+import { fetchBlinkLiveRates } from './blinkService';
 
 const STORAGE_KEY = 'altradits_rates_cache_v2';
 
 /**
  * Returns previously verified live rates from persistent cache if available, or null.
- * Zero mock or synthetic fallback figures.
+ * Ensures offline transactions and currency conversions continue without network connection.
  */
 export function getCachedRates(): ExchangeRates | null {
   try {
@@ -15,6 +16,7 @@ export function getCachedRates(): ExchangeRates | null {
         return {
           ...parsed,
           isLive: false, // marked as cached
+          source: 'cache',
         };
       }
     }
@@ -25,20 +27,54 @@ export function getCachedRates(): ExchangeRates | null {
 }
 
 /**
- * Fetches real-time market rates directly from Coinbase and Forex APIs.
- * Strictly throws an error if rate providers are unreachable and no cached live rates exist.
+ * Saves rates to persistent cache
+ */
+export function saveCachedRates(rates: ExchangeRates): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rates));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Fetches real-time market rates with Blink API as the primary currency conversion engine.
+ * Seamlessly falls back to persistent cache when offline or if network issues occur.
  */
 export async function fetchLiveRates(): Promise<ExchangeRates> {
+  const errors: string[] = [];
+
+  // 1. Primary: Fetch real-time BTC, KES, ETB, and USD rates directly from Blink GraphQL API
+  try {
+    const blinkRates = await fetchBlinkLiveRates();
+    if (blinkRates.btcUsd > 0 && blinkRates.btcKes > 0) {
+      const enrichedRates: ExchangeRates = {
+        ...blinkRates,
+        source: 'blink',
+        isLive: true,
+      };
+      saveCachedRates(enrichedRates);
+      return enrichedRates;
+    }
+  } catch (err: unknown) {
+    errors.push(`Blink: ${err instanceof Error ? err.message : 'failed'}`);
+  }
+
+  // 2. Secondary fallback: Check persistent cache before external secondary calls if offline
+  const cached = getCachedRates();
+  if (typeof navigator !== 'undefined' && !navigator.onLine && cached && cached.btcUsd > 0) {
+    return cached;
+  }
+
+  // 3. Secondary provider: Coinbase Spot + Forex open.er-api.com
   let btcUsd: number | null = null;
   let change24hUsd: number | null = null;
   let usdKes: number | null = null;
   let usdEtb: number | null = null;
-  const errors: string[] = [];
 
-  // 1. Fetch real-time BTC/USD from Coinbase Spot API
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     const cbRes = await fetch('https://api.coinbase.com/v2/prices/spot?currency=USD', {
       signal: controller.signal,
     });
@@ -56,10 +92,9 @@ export async function fetchLiveRates(): Promise<ExchangeRates> {
     errors.push(`Coinbase: ${err instanceof Error ? err.message : 'timeout'}`);
   }
 
-  // 2. Fetch real live Forex rates for KES and ETB against USD
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     const fxRes = await fetch('https://open.er-api.com/v6/latest/USD', {
       signal: controller.signal,
     });
@@ -75,14 +110,12 @@ export async function fetchLiveRates(): Promise<ExchangeRates> {
         }
       }
     } else {
-      errors.push(`Forex API HTTP ${fxRes.status}`);
+      errors.push(`Forex HTTP ${fxRes.status}`);
     }
   } catch (err: unknown) {
-    errors.push(`Forex API: ${err instanceof Error ? err.message : 'timeout'}`);
+    errors.push(`Forex: ${err instanceof Error ? err.message : 'timeout'}`);
   }
 
-  // Check persistent cache for any missing Forex rates
-  const cached = getCachedRates();
   const effectiveUsdKes = usdKes || cached?.usdKes;
   const effectiveUsdEtb = usdEtb || cached?.usdEtb;
   const effectiveChange = change24hUsd !== null ? change24hUsd : (cached?.change24hUsd ?? 0);
@@ -91,7 +124,7 @@ export async function fetchLiveRates(): Promise<ExchangeRates> {
     const finalBtcKes = Math.round(btcUsd * effectiveUsdKes);
     const finalBtcEtb = Math.round(btcUsd * effectiveUsdEtb);
 
-    const liveRates: ExchangeRates = {
+    const secondaryRates: ExchangeRates = {
       btcUsd: Math.round(btcUsd * 100) / 100,
       btcKes: finalBtcKes,
       btcEtb: finalBtcEtb,
@@ -102,22 +135,19 @@ export async function fetchLiveRates(): Promise<ExchangeRates> {
       change24hEtb: Math.round(effectiveChange * 100) / 100,
       lastUpdated: Date.now(),
       isLive: true,
+      source: 'coinbase',
     };
 
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(liveRates));
-    } catch {
-      // ignore
-    }
-
-    return liveRates;
+    saveCachedRates(secondaryRates);
+    return secondaryRates;
   }
 
+  // 4. Return cached rates if any provider failed or device is offline
   if (cached && cached.btcUsd > 0) {
     return cached;
   }
 
   throw new Error(
-    `Exchange rates unavailable: Unable to retrieve live rates from Coinbase or Forex providers (${errors.join(', ')}). Connect to the internet or configure a rate feed proxy.`
+    `Exchange rates unavailable: Unable to retrieve rates from Blink, Coinbase, or Forex (${errors.join(', ')}). Connect to the internet or configure a rate feed proxy.`
   );
 }

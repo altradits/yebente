@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction } from '../types';
-import { ArrowLeft, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Copy, Check, WifiOff, ExternalLink } from 'lucide-react';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -63,6 +63,9 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   };
 
   const amount = getAmountDisplay();
+  const feeSats = transaction.realFeeSats ?? (transaction.feeCurrency === 'SATS' ? transaction.fee : 0);
+  const feeFiat = transaction.realFeeFiat;
+  const feeCurrency = transaction.realFeeCurrency || 'KES';
 
   return (
     <div
@@ -89,7 +92,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
 
         {/* Content */}
         <div className="p-5 space-y-4">
-          {/* Main Amount & Title */}
+          {/* Main Amount and Title */}
           <div className="text-center py-2">
             <div
               className={`text-2xl font-bold font-mono tabular-nums ${
@@ -111,7 +114,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-[#9B97A2]">Reference</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[#F8F0E7] font-semibold">
+                <span className="text-[#F8F0E7] font-semibold truncate max-w-[150px]">
                   {transaction.referenceNumber}
                 </span>
                 <button
@@ -133,21 +136,79 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
               </div>
             )}
 
-            {transaction.type === 'send_mpesa' && (
+            {(transaction.type === 'send_mpesa' || transaction.type === 'send_telebirr') && transaction.fromCurrency === 'SATS' && (
+              <>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#9B97A2]">Sats Debited</span>
+                  <span className="text-[#F8F0E7] font-bold">
+                    -{(Number(transaction.fromAmount || 0) + feeSats).toLocaleString()} Sats
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#9B97A2]">Fiat Delivered</span>
+                  <span className="text-[#D1B9B3]">
+                    {Number(transaction.toAmount || 0).toLocaleString()} {transaction.toCurrency || 'KES'}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {Boolean(transaction.rateUsed && transaction.rateUsed > 0) && (
               <div className="flex justify-between items-center">
-                <span className="text-[#9B97A2]">Sats debited</span>
-                <span className="text-[#F8F0E7]">
-                  {(Number(transaction.fromAmount || 0) + Number(transaction.fee || 0)).toLocaleString()} Sats
+                <span className="text-[#9B97A2]">Rate</span>
+                <span className="text-[#9B97A2]">
+                  1 BTC = {Math.round(transaction.rateUsed!).toLocaleString()} {transaction.toCurrency || 'KES'}
                 </span>
               </div>
             )}
 
-            {transaction.fee > 0 && (
+            {/* Real Transaction Cost */}
+            <div className="flex justify-between items-center">
+              <span className="text-[#9B97A2]">Real Cost</span>
+              <span className="text-[#F8F0E7]">
+                {feeSats > 0 ? (
+                  `${feeSats.toLocaleString()} Sats${feeFiat ? ` (~${feeFiat} ${feeCurrency})` : ''}`
+                ) : (
+                  '0 Sats'
+                )}
+              </span>
+            </div>
+
+            {transaction.feeRateSatPerVb && (
               <div className="flex justify-between items-center">
-                <span className="text-[#9B97A2]">Fee</span>
-                <span className="text-[#9B97A2]">
-                  {transaction.fee} {transaction.feeCurrency}
+                <span className="text-[#9B97A2]">Fee Rate</span>
+                <span className="text-[#D1B9B3]">
+                  {transaction.feeRateSatPerVb} sat/vB
                 </span>
+              </div>
+            )}
+
+            {/* Offline metadata */}
+            {transaction.isOffline && (
+              <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
+                <span className="text-amber-400 flex items-center gap-1">
+                  <WifiOff className="w-3 h-3" />
+                  <span>Settlement</span>
+                </span>
+                <span className="text-amber-300">
+                  {transaction.offlineStatus === 'synced' ? 'Synced Live' : 'Queued Offline'}
+                </span>
+              </div>
+            )}
+
+            {/* Official Tando / M-Pesa Receipt */}
+            {transaction.receiptUrl && (
+              <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
+                <span className="text-[#9B97A2]">Receipt</span>
+                <a
+                  href={transaction.receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400 hover:text-emerald-300 underline flex items-center gap-1 text-[11px]"
+                >
+                  <span>bitcoin.co.ke</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
             )}
           </div>

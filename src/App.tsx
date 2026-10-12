@@ -9,6 +9,12 @@ import {
   ejectWallet,
   wipeWallet,
 } from './services/storageService';
+import {
+  isNetworkOnline,
+  getOfflineOutbox,
+  syncOfflineOutbox,
+  setupOfflineSyncListeners,
+} from './services/offlineService';
 import { TopBar } from './components/TopBar';
 import { BalanceCard } from './components/BalanceCard';
 import { ActionGrid } from './components/ActionGrid';
@@ -40,8 +46,9 @@ export default function App() {
   );
   const [ratesError, setRatesError] = useState<string | null>(null);
 
-  const [isRefreshingRates, setIsRefreshingRates] = useState(false);
   const [isFrameMode, setIsFrameMode] = useState(true);
+  const [isOnline, setIsOnline] = useState<boolean>(isNetworkOnline);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState<number>(() => getOfflineOutbox().length);
 
   // Modals
   const [activeModal, setActiveModal] = useState<
@@ -49,17 +56,14 @@ export default function App() {
   >('none');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
-  // Load live rates
+  // Load live rates with Blink as primary engine
   const loadRates = useCallback(async () => {
-    setIsRefreshingRates(true);
     try {
       const data = await fetchLiveRates();
       setRates(data);
       setRatesError(null);
     } catch (err: unknown) {
-      setRatesError(err instanceof Error ? err.message : 'Unable to reach rates provider.');
-    } finally {
-      setIsRefreshingRates(false);
+      setRatesError(err instanceof Error ? err.message : 'Unable to reach Blink rate feed.');
     }
   }, []);
 
@@ -68,6 +72,17 @@ export default function App() {
     const interval = setInterval(loadRates, 30000);
     return () => clearInterval(interval);
   }, [loadRates]);
+
+  // Set up automatic offline listeners and sync reconciliation
+  useEffect(() => {
+    const cleanup = setupOfflineSyncListeners((onlineStatus, count) => {
+      setIsOnline(onlineStatus);
+      setPendingOfflineCount(count);
+      setTransactions(getStoredTransactions());
+      setWallet(getStoredWallet());
+    });
+    return cleanup;
+  }, []);
 
   const handleUpdateWallet = (updated: UserWallet) => {
     setWallet(updated);
@@ -82,6 +97,8 @@ export default function App() {
   const handleWipeWallet = () => {
     const wiped = wipeWallet();
     setWallet(wiped);
+    setTransactions([]);
+    setPendingOfflineCount(0);
   };
 
   const handleRequireWalletAction = (action: () => void) => {
@@ -96,6 +113,14 @@ export default function App() {
     const { updatedWallet, updatedTransactions } = addTransaction(txData, wallet);
     setWallet(updatedWallet);
     setTransactions(updatedTransactions);
+    setPendingOfflineCount(getOfflineOutbox().length);
+  };
+
+  const handleManualSyncOffline = async () => {
+    await syncOfflineOutbox();
+    setPendingOfflineCount(getOfflineOutbox().length);
+    setTransactions(getStoredTransactions());
+    setWallet(getStoredWallet());
   };
 
   return (
@@ -108,20 +133,23 @@ export default function App() {
             : 'max-w-2xl bg-[#16101D] flex flex-col min-h-screen'
         }`}
       >
-        {/* Top Bar with brand yebente and settings */}
+        {/* Top Bar with brand yebente, offline badge, and settings */}
         <TopBar
           wallet={wallet}
           onOpenWalletSettings={() => setActiveModal('wallet_settings')}
           isFrameMode={isFrameMode}
           onToggleFrameMode={() => setIsFrameMode(!isFrameMode)}
+          isOnline={isOnline}
+          pendingOfflineCount={pendingOfflineCount}
+          onSyncOffline={handleManualSyncOffline}
         />
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-6">
           {ratesError && rates.btcUsd === 0 && (
-            <div className="p-3 rounded-2xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs">
+            <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/30 text-amber-300 text-xs font-mono">
               <p className="font-semibold">Exchange Rates Offline</p>
-              <p className="text-[11px] text-red-400/90 mt-0.5">{ratesError}</p>
+              <p className="text-[11px] text-amber-400/90 mt-0.5">{ratesError}</p>
             </div>
           )}
 
@@ -135,7 +163,7 @@ export default function App() {
             />
           )}
 
-          {/* Core wallet and payment actions: 4 streamlined buttons */}
+          {/* Core wallet and payment actions */}
           <ActionGrid
             onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
             onSendMpesa={() => handleRequireWalletAction(() => setActiveModal('send_mpesa'))}
@@ -149,7 +177,6 @@ export default function App() {
             onSelectTransaction={(tx) => setSelectedTx(tx)}
           />
         </main>
-
       </div>
 
       {/* Modals */}
@@ -173,6 +200,7 @@ export default function App() {
         isOpen={activeModal === 'send_btc'}
         onClose={() => setActiveModal('none')}
         wallet={wallet}
+        rates={rates}
         onSuccess={handleTransactionSuccess}
       />
 

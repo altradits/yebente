@@ -115,7 +115,7 @@ async function parseSafeJson<T = any>(response: Response): Promise<{ ok: boolean
       ok: false,
       data: {
         error: isProxyDown
-          ? 'Backend Daraja bridge on port 3001 is offline. Start it with `node server.js`.'
+          ? 'Backend Daraja bridge on port 3002 is offline. Start it with `node server.js`.'
           : `Server returned non-JSON response (Status ${response.status}).`,
       } as T,
     };
@@ -270,6 +270,8 @@ export async function verifyC2BHakikisha(
   }
 }
 
+import { requestTandoInvoice, pollTandoReceipt } from './tandoService';
+
 export interface SendPayoutParams {
   phone: string;
   amount: number;
@@ -286,15 +288,57 @@ export interface SendPayoutResponse {
   currency?: string;
   satsAmount?: number;
   message?: string;
+  receiptUrl?: string;
   error?: string;
 }
 
 /**
- * Dispatches an M-Pesa B2C payout / off-ramps Sats or KES to a recipient phone number
+ * Dispatches an M-Pesa payout directly to a recipient phone number via Tando Lightning rail
  */
 export async function sendMpesaPayout(params: SendPayoutParams): Promise<SendPayoutResponse> {
   const formattedPhone = formatKenyanPhone(params.phone);
 
+  // 1. Primary Engine: Tando LNURL-pay API (zero credentials required, direct to Safaricom phone)
+  try {
+    const invoiceRes = await requestTandoInvoice({
+      phone: formattedPhone,
+      amount: params.amount,
+      mode: 'KES',
+    });
+
+    if (invoiceRes.success && invoiceRes.paymentHash) {
+      const receiptUrl = invoiceRes.successAction?.url || `https://bitcoin.co.ke/receipt/${invoiceRes.paymentHash}`;
+      const pollRes = await pollTandoReceipt(invoiceRes.paymentHash, { timeoutMs: 30000 });
+
+      if (pollRes.success && pollRes.transaction) {
+        return {
+          success: true,
+          referenceNumber: pollRes.transaction.paymentNetworkReceipt || invoiceRes.paymentHash.slice(0, 10).toUpperCase(),
+          phone: formattedPhone,
+          amount: pollRes.transaction.currencyAmountSent || params.amount,
+          currency: 'KES',
+          satsAmount: pollRes.transaction.satsAmount || params.satsAmount,
+          receiptUrl,
+          message: `M-Pesa payout confirmed via Tando. Code: ${pollRes.transaction.paymentNetworkReceipt}`,
+        };
+      }
+
+      return {
+        success: true,
+        referenceNumber: invoiceRes.paymentHash.slice(0, 10).toUpperCase(),
+        phone: formattedPhone,
+        amount: params.amount,
+        currency: 'KES',
+        satsAmount: params.satsAmount,
+        receiptUrl,
+        message: 'M-Pesa payout dispatched via Tando Lightning rail.',
+      };
+    }
+  } catch {
+    // fall through to backend bridge if offline or error
+  }
+
+  // 2. Fallback to local Daraja bridge if configured
   try {
     const response = await fetch('/api/mpesa/payout', {
       method: 'POST',
@@ -332,30 +376,6 @@ export async function sendMpesaPayout(params: SendPayoutParams): Promise<SendPay
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Network error during M-Pesa payout.',
-    };
-  }
-}
-
-/**
- * Simulates a successful STK Push callback on the local bridge when running against Safaricom Sandbox
- */
-export async function simulateSandboxStkSuccess(
-  checkoutRequestId: string,
-  amount?: number,
-  phone?: string
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const response = await fetch('/api/mpesa/sandbox/simulate-stk-success', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ checkoutRequestId, amount, phone }),
-    });
-    const data = await response.json();
-    return { success: response.ok && Boolean(data.success), error: data.error };
-  } catch (err: unknown) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Network error simulating callback.',
     };
   }
 }

@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { UserWallet, ExchangeRates } from '../types';
 import { Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { queryWebLNBalance, isLightningAddress } from '../services/lightningService';
-import { fetchBitcoinAddressBalance } from '../services/blockchainService';
+import { queryWebLNBalance } from '../services/lightningService';
 import { computeCustodialBalanceFromTransactions, getStoredTransactions } from '../services/storageService';
 
 interface BalanceCardProps {
@@ -30,9 +29,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     if (!wallet.isConnected) return;
     setIsSyncing(true);
     try {
+      const verifiedSats = computeCustodialBalanceFromTransactions(getStoredTransactions());
+
       // 1. If custodial wallet, sync balance strictly from verified transactions
       if (wallet.type === 'custodial') {
-        const verifiedSats = computeCustodialBalanceFromTransactions(getStoredTransactions());
         if (onUpdateWallet) {
           onUpdateWallet({
             ...wallet,
@@ -44,37 +44,30 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         return;
       }
 
-      // 2. If WebLN is present in browser, auto-query it first
+      // 2. If WebLN is present in browser, auto-query it
       const weblnRes = await queryWebLNBalance();
       if (weblnRes.available && typeof weblnRes.sats === 'number') {
         if (onUpdateWallet) {
+          const resolvedSats = Math.max(verifiedSats, weblnRes.sats);
           onUpdateWallet({
             ...wallet,
-            satsBalance: weblnRes.sats,
-            btcBalance: weblnRes.sats / 100_000_000,
+            satsBalance: resolvedSats,
+            btcBalance: resolvedSats / 100_000_000,
             lastSyncedAt: Date.now(),
           });
         }
         return;
       }
 
-      // 3. If on-chain address is present, query blockchain indexers
-      if (wallet.nonCustodialAddress && !isLightningAddress(wallet.nonCustodialAddress)) {
-        const onChainRes = await fetchBitcoinAddressBalance(wallet.nonCustodialAddress);
-        if (onChainRes.success && onUpdateWallet) {
-          onUpdateWallet({
-            ...wallet,
-            satsBalance: onChainRes.sats,
-            btcBalance: onChainRes.sats / 100_000_000,
-            lastSyncedAt: Date.now(),
-            onChainVerified: true,
-          });
-          return;
-        }
+      // 3. Ledger fallback: ensure sats balance is backed up by transaction evidence
+      if (onUpdateWallet) {
+        onUpdateWallet({
+          ...wallet,
+          satsBalance: verifiedSats,
+          btcBalance: verifiedSats / 100_000_000,
+          lastSyncedAt: Date.now(),
+        });
       }
-
-      // 4. For mobile Lightning addresses, open settings modal to update sats
-      onOpenWalletSettings();
     } finally {
       setIsSyncing(false);
     }

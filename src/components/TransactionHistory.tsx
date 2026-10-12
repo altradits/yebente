@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction } from '../types';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, WifiOff } from 'lucide-react';
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
@@ -25,8 +25,23 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
   const validTransactions = transactions.filter((tx) => {
     if (!tx || typeof tx !== 'object') return false;
-    if (tx.status !== 'completed') return false;
-    if (!tx.referenceNumber || !tx.referenceNumber.trim()) return false;
+    if (tx.status !== 'completed' && !tx.isOffline) return false;
+    if (!tx.referenceNumber || typeof tx.referenceNumber !== 'string' || !tx.referenceNumber.trim()) return false;
+    if (['tx_001', 'tx_002', 'tx_003', 'tx_004'].includes(tx.id)) return false;
+    const upperRef = tx.referenceNumber.toUpperCase();
+    if (
+      upperRef.includes('SIM-') ||
+      upperRef.includes('MOCK-') ||
+      upperRef.includes('FALLBACK') ||
+      upperRef.includes('TEST-') ||
+      upperRef.includes('FAKE-') ||
+      upperRef.includes('SIMULAT')
+    ) {
+      return false;
+    }
+    const fromAmt = Number(tx.fromAmount || 0);
+    const toAmt = Number(tx.toAmount || 0);
+    if (fromAmt <= 0 && toAmt <= 0) return false;
     return true;
   });
 
@@ -86,7 +101,6 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
             History
           </h2>
         </button>
-
       </div>
 
       {/* Content */}
@@ -100,6 +114,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
             <div className="divide-y divide-[#2B2135]/50">
               {validTransactions.map((tx) => {
                 const amount = getAmountDisplay(tx);
+                const isQueuedOffline = tx.isOffline && tx.offlineStatus === 'queued';
                 return (
                   <button
                     key={tx.id}
@@ -107,8 +122,16 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                     className="w-full py-3 flex items-center justify-between text-left hover:bg-[#231A2D]/40 px-2 rounded-xl transition-colors group"
                   >
                     <div>
-                      <div className="text-sm font-semibold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
-                        {TYPE_TITLES[tx.type] || tx.title}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-[#F8F0E7] group-hover:text-[#D1B9B3] transition-colors">
+                          {TYPE_TITLES[tx.type] || tx.title}
+                        </span>
+                        {isQueuedOffline && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-950/40 border border-amber-500/30 text-amber-300">
+                            <WifiOff className="w-2.5 h-2.5" />
+                            <span>Queued</span>
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-[#9B97A2] font-mono mt-0.5">
                         {formatDate(tx.timestamp)}

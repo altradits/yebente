@@ -597,30 +597,6 @@ export async function handleMpesaRequest(
       });
     }
 
-    if (pathname === '/c2b/simulate' && request.method === 'POST') {
-      const body = await request.json();
-      const accessToken = await getDarajaToken(baseUrl, consumerKey, consumerSecret);
-      const res = await fetch(`${baseUrl}/mpesa/c2b/v1/simulate`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ShortCode: String(body.shortCode || shortcode),
-          CommandID: body.commandId || 'CustomerPayBillOnline',
-          Amount: String(Math.round(Number(body.amount))),
-          Msisdn: formatKenyanPhone(body.msisdn),
-          BillRefNumber: body.billRefNumber || 'TestPayment',
-        }),
-      });
-      const d = await res.json();
-      return new Response(JSON.stringify({ success: res.ok, details: d }), {
-        status: res.ok ? 200 : 400,
-        headers: corsHeaders,
-      });
-    }
-
     // 13. KYC & SIM Swap
     if (pathname === '/kyc' && request.method === 'POST') {
       const body = await request.json();

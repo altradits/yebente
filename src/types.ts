@@ -17,6 +17,7 @@ export interface ExchangeRates {
   change24hEtb: number;
   lastUpdated: number;
   isLive: boolean;
+  source?: 'blink' | 'coinbase' | 'cache';
 }
 
 export interface UserWallet {
@@ -27,9 +28,11 @@ export interface UserWallet {
   btcBalance?: number;
   mpesaBalanceKes: number;
   telebirrBalanceEtb: number;
-  // Non-custodial details
+  // Non-custodial and sovereign details
   nonCustodialAddress: string;
   nonCustodialLabel?: string;
+  blinkUsername?: string;
+  blinkAddress?: string;
   insertedAt?: number;
   lastSyncedAt?: number;
   onChainVerified?: boolean;
@@ -52,8 +55,23 @@ export interface Transaction {
   rateUsed?: number;
   fee: number;
   feeCurrency: Currency;
+  
+  // Real transaction cost tracking
+  realFeeSats?: number;
+  realFeeFiat?: number;
+  realFeeCurrency?: Currency;
+  feeRateSatPerVb?: number;
+  feeSource?: 'blink' | 'mempool' | 'fixed';
+  
+  // Offline transaction metadata
+  isOffline?: boolean;
+  offlineStatus?: 'synced' | 'queued' | 'staged';
+  syncedAt?: number;
+  
   recipient?: string; // Phone number or BTC address
   referenceNumber: string; // e.g. M-Pesa code QWE892, Telebirr code TB238, or BTC TXID
   walletType: WalletType;
   note?: string;
+  receiptUrl?: string; // e.g. Tando M-Pesa receipt URL https://bitcoin.co.ke/receipt/<hash>
+  paymentHash?: string; // Lightning payment hash
 }
