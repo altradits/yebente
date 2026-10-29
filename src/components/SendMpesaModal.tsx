@@ -1,3 +1,4 @@
+import { payInvoiceWithWebLN } from '../services/lightningService';
 import React, { useState, useEffect } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import {
@@ -225,7 +226,14 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         const receiptUrl = invoiceRes.successAction?.url || (paymentHash ? `https://bitcoin.co.ke/receipt/${paymentHash}` : '');
         setTandoReceiptUrl(receiptUrl);
 
-        // Step 2: Settle payment off-chain
+        // Step 2: Settle payment off-chain, from the user's own wallet (WebLN)
+        const paid = await payInvoiceWithWebLN(invoiceRes.pr);
+        if (!paid.paid) {
+          setErrorMessage('Lightning payment route unavailable. You can queue this transaction offline to broadcast upon reconnect.');
+          setStep('error');
+          setIsNetworkFailure(true);
+          return;
+        }
         setProcessingStatus('Delivering Shillings to M-Pesa handset...');
 
         // Step 3: Poll Tando receipt endpoint for the confirmed Safaricom receipt code
@@ -279,7 +287,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         onSuccess({
           type: 'send_mpesa',
           title: `Send M-Pesa (${formatKenyanDisplayPhone(phone)})`,
-          status: 'completed',
+          status: 'pending',
           fromCurrency: 'SATS',
           fromAmount: satsRequired,
           toCurrency: 'KES',
