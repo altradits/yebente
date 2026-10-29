@@ -1,3 +1,4 @@
+import { payInvoiceWithWebLN } from '../services/lightningService';
 import React, { useState, useEffect } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
 import {
@@ -62,6 +63,20 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   // Tando live bounds state
   const [tandoBounds, setTandoBounds] = useState<TandoBoundsResult | null>(null);
 
+  // Fetch live Tando bounds when phone changes. Hooks run before the early
+  // return below, in the same order on every render (React error #310).
+  useEffect(() => {
+    if (isOpen && rail === 'mpesa' && isValidKenyanPhone(phone) && isNetworkOnline()) {
+      fetchTandoBounds(phone).then((bounds) => {
+        if (bounds.success) {
+          setTandoBounds(bounds);
+        }
+      });
+    } else {
+      setTandoBounds(null);
+    }
+  }, [isOpen, phone, rail]);
+
   if (!isOpen) return null;
 
   const currentRate = rail === 'mpesa' ? rates.btcKes : rates.btcEtb;
@@ -116,19 +131,6 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
   const totalSatsDeducted = satsRequired + satsFee;
   const isInsufficientSats = totalSatsDeducted > availableSats;
   const currentlyOnline = isNetworkOnline();
-
-  // Fetch live Tando bounds when phone changes
-  useEffect(() => {
-    if (rail === 'mpesa' && isValidKenyanPhone(phone) && currentlyOnline) {
-      fetchTandoBounds(phone).then((bounds) => {
-        if (bounds.success) {
-          setTandoBounds(bounds);
-        }
-      });
-    } else {
-      setTandoBounds(null);
-    }
-  }, [phone, rail, currentlyOnline]);
 
   const getRecipientDisplay = () =>
     rail === 'mpesa' ? formatKenyanDisplayPhone(phone) : formatEthiopianDisplayPhone(phone);
@@ -225,7 +227,14 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         const receiptUrl = invoiceRes.successAction?.url || (paymentHash ? `https://bitcoin.co.ke/receipt/${paymentHash}` : '');
         setTandoReceiptUrl(receiptUrl);
 
-        // Step 2: Settle payment off-chain
+        // Step 2: Settle payment off-chain, from the user's own wallet (WebLN)
+        const paid = await payInvoiceWithWebLN(invoiceRes.pr);
+        if (!paid.paid) {
+          setErrorMessage('Lightning payment route unavailable. You can queue this transaction offline to broadcast upon reconnect.');
+          setStep('error');
+          setIsNetworkFailure(true);
+          return;
+        }
         setProcessingStatus('Delivering Shillings to M-Pesa handset...');
 
         // Step 3: Poll Tando receipt endpoint for the confirmed Safaricom receipt code
@@ -279,7 +288,7 @@ export const SendMpesaModal: React.FC<SendMpesaModalProps> = ({
         onSuccess({
           type: 'send_mpesa',
           title: `Send M-Pesa (${formatKenyanDisplayPhone(phone)})`,
-          status: 'completed',
+          status: 'pending',
           fromCurrency: 'SATS',
           fromAmount: satsRequired,
           toCurrency: 'KES',

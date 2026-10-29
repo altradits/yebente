@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserWallet, Transaction, ExchangeRates } from '../types';
 import { ArrowLeft, CheckCircle2, AlertCircle, Loader2, WifiOff } from 'lucide-react';
-import {
+import { payInvoiceWithWebLN,
   isLightningAddress,
   resolveLightningAddress,
   createLightningInvoice,
@@ -232,7 +232,16 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
         }
       }
 
-      // 2. Dispatch via Lightning Backend
+      // 2. Pay from the user's own wallet (WebLN) when one is present
+      const ownWallet = await payInvoiceWithWebLN(finalInvoice);
+      if (ownWallet.paid) {
+        const ref = `LN-${Date.now().toString(36).toUpperCase()}`;
+        setTxReference(ref);
+        completeTransaction(ref, cleanRecipient);
+        return;
+      }
+
+      // 3. Dispatch via Lightning Backend
       try {
         const disburseRes = await fetch('/api/lightning/disburse', {
           method: 'POST',

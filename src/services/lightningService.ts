@@ -451,3 +451,24 @@ export async function checkInvoiceStatus(
   }
 }
 
+
+/**
+ * Pays a BOLT-11 invoice from the user's own wallet through WebLN (a browser
+ * wallet such as Alby). Nothing is paid by any server: the user's wallet asks
+ * them to approve. Returns paid: false when no WebLN wallet is present.
+ */
+export async function payInvoiceWithWebLN(
+  invoice: string
+): Promise<{ paid: boolean; preimage?: string; error?: string }> {
+  const anyWindow = window as unknown as {
+    webln?: { enable: () => Promise<void>; sendPayment: (pr: string) => Promise<{ preimage?: string }> };
+  };
+  if (!anyWindow.webln) return { paid: false };
+  try {
+    await anyWindow.webln.enable();
+    const res = await anyWindow.webln.sendPayment(invoice);
+    return { paid: Boolean(res && res.preimage), preimage: res?.preimage };
+  } catch (err: unknown) {
+    return { paid: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
