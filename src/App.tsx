@@ -22,7 +22,7 @@ import { TransactionHistory } from './components/TransactionHistory';
 import { BuyBtcModal } from './components/BuyBtcModal';
 import { ReceiveBtcModal } from './components/ReceiveBtcModal';
 import { SendBtcModal } from './components/SendBtcModal';
-import { SendMpesaModal } from './components/SendMpesaModal';
+import { SendMobileModal } from './components/SendMobileModal';
 import { TransactionDetailModal } from './components/TransactionDetailModal';
 import { WalletSettingsModal } from './components/WalletSettingsModal';
 
@@ -52,18 +52,18 @@ export default function App() {
 
   // Modals
   const [activeModal, setActiveModal] = useState<
-    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'send_mpesa' | 'wallet_settings'
+    'none' | 'buy_btc' | 'receive_btc' | 'send_btc' | 'send_mobile' | 'wallet_settings'
   >('none');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
-  // Load live rates with Blink as primary engine
+  // Load owner-set rates from the backend, with cache fallback
   const loadRates = useCallback(async () => {
     try {
       const data = await fetchLiveRates();
       setRates(data);
       setRatesError(null);
     } catch (err: unknown) {
-      setRatesError(err instanceof Error ? err.message : 'Unable to reach Blink rate feed.');
+      setRatesError(err instanceof Error ? err.message : 'Unable to reach the rate feed.');
     }
   }, []);
 
@@ -166,7 +166,7 @@ export default function App() {
           {/* Core wallet and payment actions */}
           <ActionGrid
             onBuyBtc={() => handleRequireWalletAction(() => setActiveModal('buy_btc'))}
-            onSendMpesa={() => handleRequireWalletAction(() => setActiveModal('send_mpesa'))}
+            onSendMobile={() => handleRequireWalletAction(() => setActiveModal('send_mobile'))}
             onReceiveBtc={() => handleRequireWalletAction(() => setActiveModal('receive_btc'))}
             onSendBtc={() => handleRequireWalletAction(() => setActiveModal('send_btc'))}
           />
@@ -204,8 +204,8 @@ export default function App() {
         onSuccess={handleTransactionSuccess}
       />
 
-      <SendMpesaModal
-        isOpen={activeModal === 'send_mpesa'}
+      <SendMobileModal
+        isOpen={activeModal === 'send_mobile'}
         onClose={() => setActiveModal('none')}
         wallet={wallet}
         rates={rates}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { extractEthiopianSubscriberDigits } from '../services/telebirrService';
+import { extractEthiopianSubscriberDigits } from '../services/phone';
 
 interface EthiopiaPhoneInputProps {
   value: string;
@@ -14,7 +14,7 @@ interface EthiopiaPhoneInputProps {
 export const EthiopiaPhoneInput: React.FC<EthiopiaPhoneInputProps> = ({
   value,
   onChange,
-  label = 'Telebirr phone number',
+  label = 'Ethiopia phone number',
   ariaLabel,
   disabled = false,
 }) => {

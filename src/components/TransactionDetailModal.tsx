@@ -10,11 +10,14 @@ interface TransactionDetailModalProps {
 const TYPE_TITLES: Record<string, string> = {
   buy_btc: 'Buy Sats',
   sell_btc: 'Sell Sats',
-  send_mpesa: 'Send M-Pesa',
-  send_telebirr: 'Send Telebirr',
-  deposit_mpesa: 'Deposit M-Pesa',
+  send_mobile: 'Send Mobile',
+  deposit_mobile: 'Deposit Mobile',
   receive_btc: 'Receive Sats',
   send_btc: 'Send Sats',
+  // Legacy kinds stored by older versions
+  send_mpesa: 'Send Mobile',
+  send_telebirr: 'Send Mobile',
+  deposit_mpesa: 'Deposit Mobile',
 };
 
 export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
@@ -40,6 +43,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   });
 
   const getAmountDisplay = () => {
+    const kind = transaction.type as string; // stored history may carry legacy kinds
     if (transaction.type === 'buy_btc' || transaction.type === 'receive_btc') {
       const sats = transaction.toCurrency === 'BTC'
         ? Math.round(Number(transaction.toAmount || 0) * 100_000_000)
@@ -52,12 +56,12 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
         : Number(transaction.fromAmount || 0);
       return { text: `-${sats.toLocaleString()} Sats`, isPositive: false };
     }
-    if (transaction.type === 'send_mpesa') {
-      return { text: `-${Number(transaction.toAmount || 0).toLocaleString()} KES`, isPositive: false };
-    }
-    if (transaction.type === 'send_telebirr') {
-      const etbVal = transaction.toCurrency === 'ETB' ? transaction.toAmount : transaction.fromAmount;
-      return { text: `-${Number(etbVal || 0).toLocaleString()} ETB`, isPositive: false };
+    if (kind === 'send_mobile' || kind === 'send_mpesa' || kind === 'send_telebirr') {
+      const currency = transaction.toCurrency || transaction.fromCurrency;
+      const value = transaction.toCurrency && transaction.toCurrency !== 'SATS' && transaction.toCurrency !== 'BTC'
+        ? transaction.toAmount
+        : transaction.fromAmount;
+      return { text: `-${Number(value || 0).toLocaleString()} ${currency}`, isPositive: false };
     }
     return { text: `${Number(transaction.fromAmount || 0).toLocaleString()} ${transaction.fromCurrency}`, isPositive: false };
   };
@@ -136,7 +140,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
               </div>
             )}
 
-            {(transaction.type === 'send_mpesa' || transaction.type === 'send_telebirr') && transaction.fromCurrency === 'SATS' && (
+            {((transaction.type as string) === 'send_mobile' || (transaction.type as string) === 'send_mpesa' || (transaction.type as string) === 'send_telebirr') && transaction.fromCurrency === 'SATS' && (
               <>
                 <div className="flex justify-between items-center">
                   <span className="text-[#9B97A2]">Sats Debited</span>
@@ -196,19 +200,25 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
               </div>
             )}
 
-            {/* Official Tando / M-Pesa Receipt */}
+            {/* Operator receipt reference, when the rail publishes one */}
             {transaction.receiptUrl && (
               <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
                 <span className="text-[#9B97A2]">Receipt</span>
-                <a
-                  href={transaction.receiptUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-emerald-400 hover:text-emerald-300 underline flex items-center gap-1 text-[11px]"
-                >
-                  <span>bitcoin.co.ke</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
+                {/^https?:\/\//.test(transaction.receiptUrl) ? (
+                  <a
+                    href={transaction.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-400 hover:text-emerald-300 underline flex items-center gap-1 text-[11px]"
+                  >
+                    <span>Open receipt</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : (
+                  <span className="text-[#F8F0E7] font-semibold truncate max-w-[150px]">
+                    {transaction.receiptUrl}
+                  </span>
+                )}
               </div>
             )}
           </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { extractKenyanSubscriberDigits } from '../services/mpesaService';
+import { extractKenyanSubscriberDigits } from '../services/phone';
 
 interface KenyaPhoneInputProps {
   value: string;
@@ -14,7 +14,7 @@ interface KenyaPhoneInputProps {
 export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
   value,
   onChange,
-  label = 'M-Pesa phone number',
+  label = 'Kenya phone number',
   ariaLabel,
   disabled = false,
 }) => {
