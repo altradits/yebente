@@ -501,7 +501,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
             )}
           </div>
 
-          {/* Sovereign Vault Encryption Section */}
+          {/* Vault Encryption Section */}
           <div className="space-y-2 pt-2 border-t border-[#382B44]/60">
             <div className="flex justify-between items-center px-1 text-xs">
               <span className="text-[#D1B9B3] font-semibold">Vault Security</span>

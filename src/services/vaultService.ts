@@ -1,5 +1,5 @@
 /**
- * Ye₿ente Sovereign Vault Service
+ * YeBente Vault Service
  *
  * Military-grade client-side cryptographic storage.
  * Enforces AES-256-GCM encryption with PBKDF2-HMAC-SHA256 key derivation.

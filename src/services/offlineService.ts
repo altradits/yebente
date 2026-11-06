@@ -53,7 +53,7 @@ export function saveOfflineOutbox(outbox: OfflineQueuedTransaction[]): void {
 
 /**
  * Queues a transaction created during network unavailability or offline state.
- * Immediately applies it to the local sovereign vault ledger and stores it in the outbox.
+ * Immediately applies it to the local wallet ledger and stores it in the outbox.
  */
 export function queueOfflineTransaction(
   txData: Omit<Transaction, 'id' | 'timestamp'>,
