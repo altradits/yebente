@@ -1,3 +1,9 @@
+/**
+ * Lightning client: the open LNURL-pay protocol for resolving any
+ * Lightning Address, WebLN for paying from the user's own browser
+ * wallet, and the backend's LND node for receiving invoices. No
+ * wallet-vendor SDK is used anywhere here.
+ */
 export interface LightningAddressDetails {
   success: boolean;
   address: string;
@@ -37,6 +43,7 @@ export function decodeLnurl(lnurlStr: string): string | null {
   if (sep === -1) return null;
 
   const dataPart = clean.substring(sep + 1);
+  if (dataPart.length <= 6) return null;
   const words: number[] = [];
   // Skip the 6-character checksum at the end
   for (let i = 0; i < dataPart.length - 6; i++) {
@@ -44,6 +51,7 @@ export function decodeLnurl(lnurlStr: string): string | null {
     if (idx === -1) return null;
     words.push(idx);
   }
+  if (words.length === 0) return null;
 
   let acc = 0;
   let bits = 0;
@@ -64,37 +72,48 @@ export function decodeLnurl(lnurlStr: string): string | null {
   }
 }
 
-import { normalizeTandoPhone, isValidTandoPhone } from './tandoService';
-
 /**
- * Checks if input is a valid Lightning Address (user@domain.com), encoded LNURL (lnurl1...),
- * or a Kenyan phone number (which functions natively as a Tando Lightning address: <phone>@bitcoin.co.ke).
+ * Checks if input is a Lightning Address (user@domain) or an encoded
+ * LNURL (lnurl1...), any domain, per the open LNURL-pay protocol.
  */
 export function isLightningAddress(input: string): boolean {
   const clean = input.trim().toLowerCase().replace(/^lightning:/i, '');
   if (clean.startsWith('lnurl1')) {
     return true;
   }
-  if (isValidTandoPhone(clean)) {
-    return true;
-  }
   const lightningRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
   return lightningRegex.test(clean);
 }
 
+function failure(
+  address: string,
+  username: string,
+  domain: string,
+  error: string
+): LightningAddressDetails {
+  return {
+    success: false,
+    address,
+    username,
+    domain,
+    provider: domain || 'Unknown',
+    minSendableSats: 0,
+    maxSendableSats: 0,
+    callbackUrl: '',
+    commentAllowed: 0,
+    error,
+  };
+}
+
 /**
- * Resolves a Lightning Address (such as user@walletofsatoshi.com, user@blink.sv, or phone@bitcoin.co.ke)
- * via the LNURL-pay protocol (RFC-LNURL) to verify the wallet is authentic and active.
+ * Resolves a Lightning Address via the LNURL-pay protocol to verify
+ * the wallet answers and to read its limits. The provider label is
+ * the domain itself; no wallet-vendor directory is kept.
  */
 export async function resolveLightningAddress(
   address: string
 ): Promise<LightningAddressDetails> {
-  let clean = address.trim().toLowerCase().replace(/^lightning:/i, '');
-
-  // If a Kenyan phone number is entered, normalize to Tando Lightning address
-  if (isValidTandoPhone(clean)) {
-    clean = `${normalizeTandoPhone(clean)}@bitcoin.co.ke`;
-  }
+  const clean = address.trim().toLowerCase().replace(/^lightning:/i, '');
 
   let targetUrl: string;
   let defaultUsername = '';
@@ -103,18 +122,7 @@ export async function resolveLightningAddress(
   if (clean.startsWith('lnurl1')) {
     const decoded = decodeLnurl(clean);
     if (!decoded) {
-      return {
-        success: false,
-        address: clean,
-        username: '',
-        domain: '',
-        provider: 'Unknown',
-        minSendableSats: 0,
-        maxSendableSats: 0,
-        callbackUrl: '',
-        commentAllowed: 0,
-        error: 'Invalid bech32 LNURL encoding.',
-      };
+      return failure(clean, '', '', 'Invalid bech32 LNURL encoding.');
     }
     targetUrl = decoded;
     try {
@@ -129,18 +137,7 @@ export async function resolveLightningAddress(
   } else {
     const [username, domain] = clean.split('@');
     if (!username || !domain) {
-      return {
-        success: false,
-        address: clean,
-        username: '',
-        domain: '',
-        provider: 'Unknown',
-        minSendableSats: 0,
-        maxSendableSats: 0,
-        callbackUrl: '',
-        commentAllowed: 0,
-        error: 'Invalid Lightning Address format.',
-      };
+      return failure(clean, '', '', 'Invalid Lightning Address format.');
     }
     defaultUsername = username;
     defaultDomain = domain;
@@ -157,51 +154,18 @@ export async function resolveLightningAddress(
     clearTimeout(timeoutId);
 
     if (!res.ok) {
-      return {
-        success: false,
-        address: clean,
-        username: defaultUsername,
-        domain: defaultDomain,
-        provider: defaultDomain,
-        minSendableSats: 0,
-        maxSendableSats: 0,
-        callbackUrl: '',
-        commentAllowed: 0,
-        error: `Could not reach Lightning wallet at ${defaultDomain}.`,
-      };
+      return failure(clean, defaultUsername, defaultDomain, `Could not reach Lightning wallet at ${defaultDomain}.`);
     }
 
     const data = await res.json();
 
     if (data.status === 'ERROR') {
-      return {
-        success: false,
-        address: clean,
-        username: defaultUsername,
-        domain: defaultDomain,
-        provider: defaultDomain,
-        minSendableSats: 0,
-        maxSendableSats: 0,
-        callbackUrl: '',
-        commentAllowed: 0,
-        error: data.reason || 'Lightning address resolution returned error.',
-      };
-    }
-
-    // Extract provider name from domain or metadata
-    let provider = defaultDomain;
-    if (defaultDomain.includes('walletofsatoshi')) {
-      provider = 'Wallet of Satoshi';
-    } else if (defaultDomain.includes('blink.sv')) {
-      provider = 'Blink (Galoy)';
-    } else if (defaultDomain.includes('bitcoin.co.ke')) {
-      provider = 'Tando (M-Pesa)';
-    } else if (defaultDomain.includes('getalby')) {
-      provider = 'Alby';
-    } else if (defaultDomain.includes('strike.me')) {
-      provider = 'Strike';
-    } else if (defaultDomain.includes('coinos.io')) {
-      provider = 'CoinOS';
+      return failure(
+        clean,
+        defaultUsername,
+        defaultDomain,
+        data.reason || 'Lightning address resolution returned error.'
+      );
     }
 
     // Extract human-readable address from metadata if present (LUD-06 / LUD-16 spec)
@@ -244,7 +208,7 @@ export async function resolveLightningAddress(
       address: standardAddress,
       username: defaultUsername,
       domain: defaultDomain,
-      provider,
+      provider: defaultDomain,
       minSendableSats,
       maxSendableSats,
       callbackUrl: data.callback || '',
@@ -253,18 +217,7 @@ export async function resolveLightningAddress(
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Network error';
-    return {
-      success: false,
-      address: clean,
-      username: defaultUsername,
-      domain: defaultDomain,
-      provider: defaultDomain,
-      minSendableSats: 0,
-      maxSendableSats: 0,
-      callbackUrl: '',
-      commentAllowed: 0,
-      error: `Network error connecting to ${defaultDomain}: ${message}`,
-    };
+    return failure(clean, defaultUsername, defaultDomain, `Network error connecting to ${defaultDomain}: ${message}`);
   }
 }
 
@@ -318,8 +271,8 @@ export async function createLightningInvoice(
 }
 
 /**
- * Inspects if a WebLN browser extension (Alby, Zeus, etc.) is connected,
- * and queries the live satoshi balance automatically without manual input.
+ * Inspects if a WebLN browser extension is connected, and queries the
+ * live satoshi balance automatically without manual input.
  */
 export async function queryWebLNBalance(): Promise<WebLNBalanceResult> {
   const anyWindow = window as unknown as {
@@ -371,8 +324,8 @@ export interface InvoiceStatusResponse {
 }
 
 /**
- * Creates a Lightning BOLT-11 deposit invoice via Ye₿ente backend
- * to accept sats from Wallet of Satoshi or any Lightning wallet.
+ * Creates a Lightning BOLT-11 deposit invoice via the backend, which
+ * mints it on the operator's own LND node.
  */
 export async function createDepositInvoice(
   satsAmount: number,
@@ -386,7 +339,7 @@ export async function createDepositInvoice(
       },
       body: JSON.stringify({
         satsAmount,
-        memo: memo || 'Ye₿ente Sats Deposit',
+        memo: memo || 'YeBente Sats Deposit',
       }),
     });
 
@@ -451,11 +404,11 @@ export async function checkInvoiceStatus(
   }
 }
 
-
 /**
- * Pays a BOLT-11 invoice from the user's own wallet through WebLN (a browser
- * wallet such as Alby). Nothing is paid by any server: the user's wallet asks
- * them to approve. Returns paid: false when no WebLN wallet is present.
+ * Pays a BOLT-11 invoice from the user's own wallet through WebLN (a
+ * browser wallet). Nothing is paid by any server: the user's wallet
+ * asks them to approve. Returns paid: false when no WebLN wallet is
+ * present.
  */
 export async function payInvoiceWithWebLN(
   invoice: string
