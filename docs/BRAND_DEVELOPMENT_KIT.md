@@ -1,6 +1,6 @@
 # Ye₿ente Brand Development Kit (BDK) & Design Architecture
 
-**The Sovereign Design Standard for African Monetary Liberation.**
+**The Ye₿ente Design Standard for African Households.**
 
 ---
 
@@ -15,7 +15,7 @@ Ye₿ente was born to solve a generational injustice: everyday African household
 - **The Core Axiom**: **"Hard Money for the African Household."**
 
 ### Brand Soul & Persona
-- **Role**: Liberator, Guardian of Household Wealth, Direct Enabler of Sovereign Trade.
+- **Role**: Guardian of Household Wealth, Direct Enabler of Household Trade.
 - **Voice**: Dignified, Calm, Direct, Authoritative, Free of Crypto Speculation Hype.
 - **Tone**: Concise and action-focused. We never speak in confusing jargon to people who just want to send food, rent, or trade money to their family across the border.
 
