@@ -108,7 +108,7 @@ async function runProviderTests() {
 
     const notify = new UnavailableNotifications();
     const notifyError = await assertThrowsCode(
-      () => notify.send({ channel: 'email', to: 'a@b.c', kind: 'info', body: 'hi' }),
+      () => notify.send({ channel: 'email', to: '5tan@altradits.com', kind: 'info', body: 'hi' }),
       'NOTIFY_UNAVAILABLE',
     );
     assert.match(notifyError.message, /not available yet/);
@@ -162,12 +162,12 @@ async function runProviderTests() {
     assert.equal(quote.rateSource, 'owner');
     assert.ok(quote.expiresAt > Date.now());
 
-    const first = await ramp.collect({ quoteId: quote.quoteId, phone: '254712345678', idempotencyKey: 'key-1' });
+    const first = await ramp.collect({ quoteId: quote.quoteId, phone: '254707172370', idempotencyKey: 'key-1' });
     assert.equal(first.state, 'paid'); // autoSettle
     assert.ok(first.receipt);
 
     // Same idempotency key: same reference, never a second charge.
-    const replay = await ramp.collect({ quoteId: quote.quoteId, phone: '254712345678', idempotencyKey: 'key-1' });
+    const replay = await ramp.collect({ quoteId: quote.quoteId, phone: '254707172370', idempotencyKey: 'key-1' });
     assert.equal(replay.reference, first.reference);
 
     const status = await ramp.status(first.reference);
@@ -182,7 +182,7 @@ async function runProviderTests() {
     // Pending by default when autoSettle is off.
     const pending = new FakeOnRamp(price, { rail: 'test' });
     const q2 = await pending.quote(1000, 'KES');
-    const t2 = await pending.collect({ quoteId: q2.quoteId, phone: '254712345678', idempotencyKey: 'k' });
+    const t2 = await pending.collect({ quoteId: q2.quoteId, phone: '254707172370', idempotencyKey: 'k' });
     assert.equal(t2.state, 'pending');
     assert.equal((await pending.status(t2.reference)).state, 'pending');
     const settled = pending.settle(t2.reference, 'paid');
@@ -208,7 +208,7 @@ async function runProviderTests() {
       rail: 'test',
       feePercent: 2,
       floatMinor: 500_000,
-      accounts: { '254712345678': 'Test User' },
+      accounts: { '254707172370': 'Test User' },
     });
 
     const quote = await ramp.quote(1_000_000, 'KES'); // 0.01 BTC = 100,000.00 KES
@@ -217,16 +217,16 @@ async function runProviderTests() {
 
     assert.equal(await ramp.floatBalance('KES'), 500_000);
 
-    const found = await ramp.resolveAccount('254712345678');
+    const found = await ramp.resolveAccount('254707172370');
     assert.equal(found.found, true);
     assert.equal(found.name, 'Test User');
     const missing = await ramp.resolveAccount('254700000000');
     assert.equal(missing.found, false);
     assert.equal(missing.name, undefined);
 
-    const payout = await ramp.payout({ quoteId: quote.quoteId, phone: '254712345678', idempotencyKey: 'p-1' });
+    const payout = await ramp.payout({ quoteId: quote.quoteId, phone: '254707172370', idempotencyKey: 'p-1' });
     assert.equal(payout.state, 'pending');
-    const replay = await ramp.payout({ quoteId: quote.quoteId, phone: '254712345678', idempotencyKey: 'p-1' });
+    const replay = await ramp.payout({ quoteId: quote.quoteId, phone: '254707172370', idempotencyKey: 'p-1' });
     assert.equal(replay.reference, payout.reference);
 
     // Scripted failures happen once, then behavior returns to normal.
@@ -244,11 +244,11 @@ async function runProviderTests() {
   console.log('[TEST 5] Fake notifications record every message...');
   {
     const fake = new FakeNotifications();
-    await fake.send({ channel: 'email', to: 'user@example.com', kind: 'receipt', subject: 'Paid', body: 'done' });
-    await fake.send({ channel: 'sms', to: '254712345678', kind: 'security', body: 'alert' });
+    await fake.send({ channel: 'email', to: '5tan@altradits.com', kind: 'receipt', subject: 'Paid', body: 'done' });
+    await fake.send({ channel: 'sms', to: '254707172370', kind: 'security', body: 'alert' });
     assert.equal(fake.sent.length, 2);
     assert.equal(fake.sent[0].channel, 'email');
-    assert.equal(fake.sent[1].to, '254712345678');
+    assert.equal(fake.sent[1].to, '254707172370');
     fake.clear();
     assert.equal(fake.sent.length, 0);
 

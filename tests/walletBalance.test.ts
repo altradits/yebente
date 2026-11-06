@@ -337,14 +337,14 @@ async function runAllBalanceTests() {
   // -------------------------------------------------------------------------
   console.log('[TEST 6] Verifying phone number utilities...');
   {
-    assert.equal(extractKenyanSubscriberDigits('+254 712 345 678'), '712345678');
-    assert.equal(extractKenyanSubscriberDigits('0712345678'), '712345678');
-    assert.equal(isValidKenyanPhone('0712345678'), true);
+    assert.equal(extractKenyanSubscriberDigits('+254 707 172 370'), '707172370');
+    assert.equal(extractKenyanSubscriberDigits('0707172370'), '707172370');
+    assert.equal(isValidKenyanPhone('0707172370'), true);
     assert.equal(isValidKenyanPhone('0112345678'), true);
-    assert.equal(isValidKenyanPhone('254712345678'), true);
+    assert.equal(isValidKenyanPhone('254707172370'), true);
     assert.equal(isValidKenyanPhone('0600000000'), false);
-    assert.equal(formatKenyanPhone('0712345678'), '254712345678');
-    assert.equal(formatKenyanDisplayPhone('254712345678'), '+254 712 345 678');
+    assert.equal(formatKenyanPhone('0707172370'), '254707172370');
+    assert.equal(formatKenyanDisplayPhone('254707172370'), '+254 707 172 370');
 
     assert.equal(extractEthiopianSubscriberDigits('+251911234567'), '911234567');
     assert.equal(extractEthiopianSubscriberDigits('0911234567'), '911234567');
@@ -380,7 +380,7 @@ async function runAllBalanceTests() {
     assert.equal(quoteDown.unavailable, true);
     assert.match(quoteDown.error || '', /not available yet/);
 
-    const collectDown = await startFiatTransfer({ direction: 'buy', quoteId: 'Q-1', phone: '254712345678', idempotencyKey: 'k-1' });
+    const collectDown = await startFiatTransfer({ direction: 'buy', quoteId: 'Q-1', phone: '254707172370', idempotencyKey: 'k-1' });
     assert.equal(collectDown.success, false);
     assert.equal(collectDown.unavailable, true);
 
@@ -402,7 +402,7 @@ async function runAllBalanceTests() {
     assert.equal(quote.quoteId, 'Q-9');
     assert.equal(quote.sats, 7407);
 
-    const collect = await startFiatTransfer({ direction: 'buy', quoteId: 'Q-9', phone: '254712345678', idempotencyKey: 'k-9' });
+    const collect = await startFiatTransfer({ direction: 'buy', quoteId: 'Q-9', phone: '254707172370', idempotencyKey: 'k-9' });
     assert.equal(collect.success, true);
     assert.equal(collect.reference, 'REF-9');
     assert.equal(seenRequests[seenRequests.length - 1].body && (seenRequests[seenRequests.length - 1].body as { idempotencyKey: string }).idempotencyKey, 'k-9');

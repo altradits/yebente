@@ -154,7 +154,7 @@ export interface FiatTransfer {
 
 export interface CollectInput {
   quoteId: string;
-  /** E.164 digits without '+', e.g. 254712345678. */
+  /** E.164 digits without '+', e.g. 254707172370. */
   phone: string;
   /** Fresh UUID per user action, stored with the record. */
   idempotencyKey: string;

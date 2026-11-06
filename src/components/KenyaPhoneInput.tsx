@@ -44,7 +44,7 @@ export const KenyaPhoneInput: React.FC<KenyaPhoneInputProps> = ({
     inputRef.current?.focus();
   };
 
-  // Formatter for display: "712 345 678"
+  // Formatter for display: "707 172 370"
   const formatDisplayDigits = (val: string) => {
     if (!val) return '';
     if (val.length <= 3) return val;
