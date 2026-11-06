@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/walletBalance.test.ts"
+    "test": "tsx tests/providers.test.ts && tsx tests/walletBalance.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

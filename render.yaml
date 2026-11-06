@@ -10,17 +10,21 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22
-      - key: MPESA_ENVIRONMENT
-        value: sandbox
-      - key: MPESA_SHORTCODE
-        value: "174379"
-      - key: MPESA_PASSKEY
-        value: bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919
-      - key: MPESA_CALLBACK_URL
+      - key: BITCOIN_CORE_RPC_URL
         sync: false
-      - key: MPESA_CALLBACK_TOKEN
+      - key: BITCOIN_CORE_RPC_USER
         sync: false
-      - key: MPESA_CONSUMER_KEY
+      - key: BITCOIN_CORE_RPC_PASSWORD
         sync: false
-      - key: MPESA_CONSUMER_SECRET
+      - key: LND_REST_URL
+        sync: false
+      - key: LND_INVOICE_MACAROON
+        sync: false
+      - key: LND_PAY_MACAROON
+        sync: false
+      - key: YEBENTE_OWNER_BTC_KES
+        sync: false
+      - key: YEBENTE_OWNER_BTC_ETB
+        sync: false
+      - key: YEBENTE_OWNER_BTC_USD
         sync: false
