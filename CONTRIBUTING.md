@@ -1,82 +1,107 @@
-# Contributing Guidelines
+# Contributing to Ye₿ente
 
-## 1. Core Principles
+## 1. Own work
 
-yebente is an open source financial interface built to enable local communities to transact securely between Bitcoin and regional mobile money systems. Every contribution must adhere to strict principles of security, simplicity, and operational authenticity.
+Code, tests and translations must be your own work.
 
-### Operational Authenticity (Zero Simulation Policy)
-* Simulated timeouts (`setTimeout` mock delays), fake balances, and mock transaction generators are strictly prohibited in production pathways.
-* Every transaction must link to verifiable on-chain data, Lightning invoices, or official mobile money gateway responses.
-* Real data integrity must be maintained at all times.
+Do not paste code, text or translations you do not have the right to
+contribute under this repo's MIT licence. Dependencies stay minimal and
+must be licence-compatible; adding one needs a line in the pull request
+saying why it is needed.
 
-### Interface Standards
-* No emojis in user interfaces, commit messages, or technical documentation.
-* No m-dashes or en-dashes. Use standard hyphens (-) or colons (:).
-* No blinking indicators, pulsing dots, or distracting animated cues.
-* No cluttering explanatory paragraphs. Every feature must be intuitive and functional by design without requiring instruction manuals.
+## 2. No company-specific code in the core
 
----
+The core (app, backend, providers) must not name, call, or shape itself
+around any company. Concretely, the core must contain:
 
-## 2. Issue and Pull Request Lifecycle
+* No company or product names in code, comments, config, docs, commit
+  messages or UI strings.
+* No vendor URLs, endpoints, credentials, collection files or
+  vendor-shaped request/response types.
+* No vendor-prefixed environment variables. Operator configuration uses
+  generic names (`BITCOIN_CORE_*`, `LND_*`, `YEBENTE_*`).
 
-To prevent issue bloat and maintain traceability, contributions must follow this sequence:
+Every outside system (a mobile-money network, a bank, a notification
+channel) plugs in behind a generic adapter interface the core defines.
+The adapter lives outside the core, implements the documented contract
+exactly, and is the only place that knows the vendor's protocol. The
+core reviews an adapter the way it reviews a network boundary: no
+leaked shapes, no silent fallbacks.
 
-1. **Issue Creation:** An issue must define a single, well-scoped deliverable.
-2. **Four-Pillar Evidentiary Gate:** Feature issues must provide evidence across the four required pillars before implementation begins.
-3. **Branch Creation:** Branches must be created from `main` using the naming pattern `feat/issue-<number>-<slug>` or `fix/issue-<number>-<slug>`.
-4. **Atomic Commits:** One logical change per commit. Commit messages must use conventional format: `type(scope): description`.
-5. **Pull Request Submission:** Each pull request must directly reference and resolve an issue using `Fixes #<number>`.
-6. **Automated Verification:** The pull request must pass all CI checks (`npm run lint`, `npm audit`, and `npm run build`) before review and merge.
-7. **Release Tagging:** Releases follow Semantic Versioning (`MAJOR.MINOR.PATCH`) scheduled when defined issue milestones are completed.
+## 3. How to build an adapter to the documented contracts
 
----
+Contracts live in [docs/independence.md](docs/independence.md)
+(sections 4.5 to 4.8). To add a live adapter:
 
-## 3. Four-Pillar Feature Justification Standard
+1. Read the contract for your rail: `quote`, `collect`/`payout`,
+   `status`, callback verification, idempotency, errors,
+   reconciliation.
+2. Implement the matching TypeScript interface from
+   `src/providers/types.ts` (`FiatOnRamp`, `FiatOffRamp`,
+   `Notifications`). Keep every method's shape exactly; add nothing
+   vendor-specific to shared types.
+3. Quote from the configured price provider only. Never invent a rate,
+   never silently mix sources, never serve a stale rate as live.
+4. Generate one fresh idempotency key per user action, store it with
+   the record, and reuse it on retry so no retry can move money twice.
+5. Verify callbacks before trusting them (secret path, and a signature
+   over the raw body where the network supports it). Answer fast.
+   Move balances only after a server-to-server status query agrees.
+6. Map outcomes onto the three error kinds only: rejected (definitive,
+   safe to show), unknown (retryable, never treated as success or
+   failure), not-configured (rail off, HTTP 501, "not available yet").
+7. Expose the reconciliation feed (`listSettlements`) so the daily
+   match runs against the operator's idempotency keys.
+8. Until the adapter is live and funded, its rail stays off and every
+   call fails with "not available yet". Faking success is never
+   acceptable.
 
-Before any feature issue can be approved for implementation, the proposal must substantiate:
+Worked example: copy `src/providers/fakeFiat.ts`, replace the
+in-memory state with real network calls, and keep the tests in
+`tests/providers.test.ts` passing against your adapter.
 
-### Pillar 1: Bitcoin Protocol Foundations
-* Direct citation of relevant sections in the Bitcoin Whitepaper (Satoshi Nakamoto, 2008).
-* Citation of applicable Bitcoin Improvement Proposals (BIPs) or Lightning Network specifications (BOLTs). Examples:
-  * BIP-21: URI Schemes for Bitcoin payments.
-  * BIP-84: Native SegWit address derivations.
-  * BIP-86: Taproot address derivations and single-key spends.
-  * BOLT-11: Lightning Network invoice protocol.
+## 4. Commits, branches and pull requests
 
-### Pillar 2: Competitor and Collaborator Analysis
-* Identification of existing market alternatives and open source infrastructure.
-* Evaluation of potential open APIs and collaborators:
-  * Breez SDK and Boltz for non-custodial Lightning and Submarine Swaps.
-  * Machankura for USSD connectivity across feature phones.
-  * Galoy / Blink for localized community banking architecture.
-  * Yellow Card and Bitnob for regional fiat rails.
+* Branches come off `main` with a descriptive name
+  (`feat/...`, `fix/...`, `docs/...`). One scoped change per branch.
+* Commit messages are one line each, plain text, no signing trailer:
+  `Add generic fiat quote client`.
+* No AI attribution in commits, code or docs. The work stands on its
+  own with its tests.
+* No emojis and no em-dashes or en-dashes in code, UI, docs or commit
+  messages.
+* Pull requests target `main` and stay small and reviewable. Never
+  push to `main` directly, never merge your own PR without review,
+  never force-push.
+* UI changes follow the Stan Style patterns already in the codebase
+  (textless back navigation, action-only buttons, borderless readouts
+  for non-interactive data).
 
-### Pillar 3: Legal and Regulatory Frameworks
-* Full compliance with regional legal boundaries:
-  * Kenya: Central Bank of Kenya (CBK) National Payment System Act, Guidelines on Mobile Money Services, and the Kenya Data Protection Act 2019 (secure processing and zero unauthorized exposure of personal identifiable information).
-  * Ethiopia: National Bank of Ethiopia (NBE) Payment Instrument Issuer Directives.
-  * Anti-Money Laundering (AML) and Counter-Financing of Terrorism (CFT) reporting thresholds.
+## 5. Tests required
 
-### Pillar 4: Cybersecurity and Threat Modeling
-* Non-custodial architectural priority: Private keys and seed material must never be sent to, stored on, or processed by centralized servers.
-* Defensive sanitization against Cross-Site Scripting (XSS), Injection, and Cross-Site Request Forgery (CSRF).
-* Cryptographic validation of all third-party payloads and webhook signatures before state updates.
-
----
-
-## 4. Local Verification Checklist
-
-Before pushing commits and submitting a pull request, run:
+Every change that touches behavior ships with tests in the same pull
+request, and all of these must exit with code 0:
 
 ```bash
-# Verify code syntax and TypeScript type integrity
 npm run lint
-
-# Verify dependency security
-npm audit --audit-level=high
-
-# Verify production compilation
+npm test
 npm run build
 ```
 
-All commands must exit with code 0.
+* New provider or adapter: contract tests against the interface,
+  including the unhappy paths (rejected, unknown, not-configured)
+  and idempotent replay.
+* New UI flow: at least the service-level tests for the calls it
+  makes, with stubbed network. Tests must never depend on live
+  outside services.
+* A failing existing test is a requirement, not an artifact: fix the
+  change, not the test.
+
+## 6. Custody honesty
+
+The live Ye₿ente is custodial. Do not describe this repo, in code,
+docs or UI strings, as non-custodial or sovereign, and do not imply
+users hold their own keys. Capabilities without an implementation
+fail with "not available yet" and are listed in
+[docs/independence.md](docs/independence.md) under "What we still
+need to build".
