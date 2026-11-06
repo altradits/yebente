@@ -10,17 +10,14 @@ import {
   computeCustodialBalanceFromTransactions,
   getStoredTransactions,
   createInAppLightningWallet,
+  getLocalHandle,
+  saveLocalHandle,
 } from '../services/storageService';
 import {
   hasEncryptedVault,
   initializeOrUpdateVault,
   wipeVaultStorage,
 } from '../services/vaultService';
-import {
-  getBlinkSovereignAddress,
-  getBlinkSovereignUsername,
-  saveBlinkSovereignUsername,
-} from '../services/blinkService';
 import {
   getOfflineOutbox,
   syncOfflineOutbox,
@@ -64,14 +61,14 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
   const [validationError, setValidationError] = useState<string>('');
   const [generatedMessage, setGeneratedMessage] = useState<string>('');
 
-  const [copiedBlink, setCopiedBlink] = useState(false);
+  const [copiedHandle, setCopiedHandle] = useState(false);
   const [copiedExternal, setCopiedExternal] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [lightningResult, setLightningResult] = useState<LightningAddressDetails | null>(null);
 
-  // Blink Sovereign Username state
-  const [blinkUsername, setBlinkUsername] = useState<string>(
-    wallet.blinkUsername || getBlinkSovereignUsername()
+  // Local handle state (display name for this device)
+  const [localHandle, setLocalHandle] = useState<string>(
+    wallet.localHandle || getLocalHandle()
   );
 
   // Offline Outbox state
@@ -105,7 +102,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
     }
 
     if (!isLightningAddress(cleanAddr)) {
-      setValidationError('Invalid Lightning Address format. Example: user@walletofsatoshi.com');
+      setValidationError('Invalid Lightning Address format. Example: user@wallet-domain.com');
       return;
     }
 
@@ -184,21 +181,18 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
       }
 
       if (rawAddress && !isLightningAddress(rawAddress) && weblnDetectedSats === null) {
-        setValidationError('Invalid Lightning Address format. Example: user@walletofsatoshi.com');
+        setValidationError('Invalid Lightning Address format. Example: user@wallet-domain.com');
         return;
       }
     }
 
-    // Save Blink sovereign username
-    const cleanBlinkUser = blinkUsername.trim().toLowerCase().replace(/^@/, '');
-    if (cleanBlinkUser) {
-      saveBlinkSovereignUsername(cleanBlinkUser);
+    // Save local handle
+    const cleanHandle = localHandle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
+    if (cleanHandle) {
+      saveLocalHandle(cleanHandle);
     }
 
-    const sovereignAddr = `${cleanBlinkUser || getBlinkSovereignUsername()}@blink.sv`;
-    const finalAddress = selectedType === 'custodial'
-      ? sovereignAddr
-      : (rawAddress || sovereignAddr);
+    const finalAddress = selectedType === 'custodial' ? '' : rawAddress;
 
     let finalSats = 0;
     if (selectedType === 'non-custodial') {
@@ -214,7 +208,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
     }
 
     const detectedLabel = selectedType === 'custodial'
-      ? 'In-App Lightning Sovereign Vault'
+      ? 'In-App Wallet'
       : (lightningResult?.provider ? `${lightningResult.provider} (Lightning)` : (weblnDetectedSats !== null ? 'WebLN Provider' : 'External Lightning'));
 
     onUpdateWallet({
@@ -223,12 +217,9 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
       type: selectedType,
       nonCustodialAddress: finalAddress,
       nonCustodialLabel: detectedLabel,
-      blinkUsername: cleanBlinkUser || getBlinkSovereignUsername(),
-      blinkAddress: sovereignAddr,
+      localHandle: cleanHandle || getLocalHandle(),
       satsBalance: finalSats,
       btcBalance: finalSats / 100_000_000,
-      mpesaBalanceKes: 0,
-      telebirrBalanceEtb: 0,
       insertedAt: wallet.insertedAt || Date.now(),
       lastSyncedAt: Date.now(),
       onChainVerified: selectedType === 'non-custodial' && Boolean(
@@ -253,7 +244,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
     setValidationError('');
     const res = await initializeOrUpdateVault(pinInput, {
       inAppSecret: `sec_${Date.now().toString(36)}`,
-      rootAddress: getBlinkSovereignAddress(),
+      rootAddress: wallet.nonCustodialAddress || localHandle,
     });
     if (res.success) {
       setVaultProtected(true);
@@ -282,14 +273,12 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
 
   const handleGenerateInAppLightningWallet = () => {
     const updated = createInAppLightningWallet();
-    setBlinkUsername(updated.blinkUsername || '');
+    setLocalHandle(updated.localHandle || '');
     setSelectedType('custodial');
     onUpdateWallet(updated);
-    setGeneratedMessage('In-App Lightning Wallet Active: 100% off-chain with 0 on-chain fees.');
+    setGeneratedMessage('In-App wallet active with a fresh local handle.');
     setTimeout(() => setGeneratedMessage(''), 5000);
   };
-
-  const sovereignBlinkAddress = `${blinkUsername || getBlinkSovereignUsername()}@blink.sv`;
 
   return (
     <div
@@ -358,19 +347,13 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                 </span>
               </div>
 
-              {/* Off-Chain Zero Fee Indicator */}
-              <div className="flex justify-between items-center px-1 text-[11px]">
-                <span className="text-[#9B97A2]">Transaction Rail</span>
-                <span className="font-mono text-emerald-400 font-semibold">100% Off-Chain Lightning (0 On-Chain Fees)</span>
-              </div>
-
-              {/* Generate In-App Lightning Wallet Action */}
+              {/* Generate In-App Wallet Action */}
               <button
                 type="button"
                 onClick={handleGenerateInAppLightningWallet}
                 className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-bold text-xs flex items-center justify-center transition-all shadow-md shadow-[#763698]/20"
               >
-                Generate In-App Lightning Wallet
+                Generate In-App Wallet
               </button>
 
               {generatedMessage && (
@@ -380,49 +363,31 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                 </div>
               )}
 
-              {/* Blink Sovereign Lightning Address */}
+              {/* Local Handle */}
               <div>
                 <div className="flex justify-between items-center text-xs text-[#D1B9B3] mb-1.5">
-                  <span className="font-semibold">Sovereign Lightning Address</span>
-                  <span className="font-mono text-[10px] text-emerald-400">Zero On-Chain Fees</span>
+                  <span className="font-semibold">Local Handle</span>
+                  <span className="font-mono text-[10px] text-[#9B97A2]">This device only</span>
                 </div>
                 <div className="relative">
                   <input
                     type="text"
-                    readOnly
-                    value={sovereignBlinkAddress}
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none pr-10 select-all"
+                    value={localHandle}
+                    onChange={(e) => setLocalHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))}
+                    placeholder="username"
+                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698] pr-10"
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(sovereignBlinkAddress);
-                      setCopiedBlink(true);
-                      setTimeout(() => setCopiedBlink(false), 2000);
+                      navigator.clipboard.writeText(localHandle);
+                      setCopiedHandle(true);
+                      setTimeout(() => setCopiedHandle(false), 2000);
                     }}
                     className="absolute right-3 top-3 text-[#9B97A2] hover:text-[#F8F0E7]"
                   >
-                    {copiedBlink ? <Check className="w-3.5 h-3.5 text-[#D1B9B3]" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedHandle ? <Check className="w-3.5 h-3.5 text-[#D1B9B3]" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
-                </div>
-              </div>
-
-              {/* Blink Username Handle */}
-              <div>
-                <label className="block text-xs font-semibold text-[#D1B9B3] mb-1.5">
-                  Custom Lightning Handle
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={blinkUsername}
-                    onChange={(e) => setBlinkUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                    placeholder="username"
-                    className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
-                  />
-                  <span className="absolute right-3 top-3 font-mono text-xs text-[#9B97A2]">
-                    @blink.sv
-                  </span>
                 </div>
               </div>
             </div>
@@ -445,7 +410,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
                       setLightningResult(null);
                       setValidationError('');
                     }}
-                    placeholder="user@walletofsatoshi.com or user@getalby.com"
+                    placeholder="user@wallet-domain.com"
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698] pr-10"
                   />
                   {address && (
@@ -536,7 +501,7 @@ export const WalletSettingsModal: React.FC<WalletSettingsModalProps> = ({
             )}
           </div>
 
-          {/* Sovereign Vault Encryption Section */}
+          {/* Vault Encryption Section */}
           <div className="space-y-2 pt-2 border-t border-[#382B44]/60">
             <div className="flex justify-between items-center px-1 text-xs">
               <span className="text-[#D1B9B3] font-semibold">Vault Security</span>

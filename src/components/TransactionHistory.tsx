@@ -10,11 +10,14 @@ interface TransactionHistoryProps {
 const TYPE_TITLES: Record<string, string> = {
   buy_btc: 'Buy Sats',
   sell_btc: 'Sell Sats',
-  send_mpesa: 'Send M-Pesa',
-  send_telebirr: 'Send Telebirr',
-  deposit_mpesa: 'Deposit M-Pesa',
+  send_mobile: 'Send Mobile',
+  deposit_mobile: 'Deposit Mobile',
   receive_btc: 'Receive Sats',
   send_btc: 'Send Sats',
+  // Legacy kinds stored by older versions
+  send_mpesa: 'Send Mobile',
+  send_telebirr: 'Send Mobile',
+  deposit_mpesa: 'Deposit Mobile',
 };
 
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
@@ -60,6 +63,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   };
 
   const getAmountDisplay = (tx: Transaction) => {
+    const kind = tx.type as string; // stored history may carry legacy kinds
     if (tx.type === 'buy_btc' || tx.type === 'receive_btc') {
       const sats = tx.toCurrency === 'BTC'
         ? Math.round(Number(tx.toAmount || 0) * 100_000_000)
@@ -72,12 +76,12 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
         : Number(tx.fromAmount || 0);
       return { text: `-${sats.toLocaleString()} Sats`, isPositive: false };
     }
-    if (tx.type === 'send_mpesa') {
-      return { text: `-${Number(tx.toAmount || 0).toLocaleString()} KES`, isPositive: false };
-    }
-    if (tx.type === 'send_telebirr') {
-      const etbVal = tx.toCurrency === 'ETB' ? tx.toAmount : tx.fromAmount;
-      return { text: `-${Number(etbVal || 0).toLocaleString()} ETB`, isPositive: false };
+    if (kind === 'send_mobile' || kind === 'send_mpesa' || kind === 'send_telebirr') {
+      const currency = tx.toCurrency || tx.fromCurrency;
+      const value = tx.toCurrency && tx.toCurrency !== 'SATS' && tx.toCurrency !== 'BTC'
+        ? tx.toAmount
+        : tx.fromAmount;
+      return { text: `-${Number(value || 0).toLocaleString()} ${currency}`, isPositive: false };
     }
     return { text: `${Number(tx.fromAmount || 0).toLocaleString()} ${tx.fromCurrency}`, isPositive: false };
   };

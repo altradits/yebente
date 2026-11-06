@@ -1,24 +1,63 @@
 import { Transaction, UserWallet } from '../types';
-import {
-  getBlinkSovereignAddress,
-  getBlinkSovereignUsername,
-  generateInAppLightningWallet,
-} from './blinkService';
 
-const WALLET_STORAGE_KEY = 'altradits_user_wallet_v1';
-const TXS_STORAGE_KEY = 'altradits_transactions_v1';
+const WALLET_STORAGE_KEY = 'yebente_wallet_v1';
+const TXS_STORAGE_KEY = 'yebente_transactions_v1';
+const HANDLE_STORAGE_KEY = 'yebente_local_handle_v1';
+
+// Previous key names, read once for migration and then removed.
+const LEGACY_WALLET_KEY = 'altradits_user_wallet_v1';
+const LEGACY_TXS_KEY = 'altradits_transactions_v1';
+
+/**
+ * Returns the wallet's local handle (a display name for this device),
+ * generating and storing a stable one on first use.
+ */
+export function getLocalHandle(): string {
+  try {
+    const saved = localStorage.getItem(HANDLE_STORAGE_KEY);
+    if (saved && saved.trim()) {
+      return saved.trim();
+    }
+  } catch {
+    // fall through to generate
+  }
+  const handle = generateLocalHandle();
+  saveLocalHandle(handle);
+  return handle;
+}
+
+/**
+ * Saves a custom local handle.
+ */
+export function saveLocalHandle(handle: string): void {
+  try {
+    const clean = handle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
+    if (clean) {
+      localStorage.setItem(HANDLE_STORAGE_KEY, clean);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function generateLocalHandle(): string {
+  try {
+    const rand = Array.from(window.crypto.getRandomValues(new Uint8Array(4)))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    return `yb_${rand}`;
+  } catch {
+    return `yb_${Math.random().toString(36).substring(2, 10)}`;
+  }
+}
 
 export const DEFAULT_WALLET: UserWallet = {
   isConnected: true,
   type: 'custodial',
   satsBalance: 0,
   btcBalance: 0,
-  mpesaBalanceKes: 0,
-  telebirrBalanceEtb: 0,
-  nonCustodialAddress: getBlinkSovereignAddress(),
-  nonCustodialLabel: 'In-App Lightning Sovereign Vault',
-  blinkUsername: getBlinkSovereignUsername(),
-  blinkAddress: getBlinkSovereignAddress(),
+  nonCustodialAddress: '',
+  nonCustodialLabel: 'In-App Wallet',
   insertedAt: Date.now(),
 };
 
@@ -27,33 +66,47 @@ export const DISCONNECTED_WALLET: UserWallet = {
   type: 'non-custodial',
   satsBalance: 0,
   btcBalance: 0,
-  mpesaBalanceKes: 0,
-  telebirrBalanceEtb: 0,
-  nonCustodialAddress: getBlinkSovereignAddress(),
-  nonCustodialLabel: 'In-App Sovereign Address',
-  blinkUsername: getBlinkSovereignUsername(),
-  blinkAddress: getBlinkSovereignAddress(),
+  nonCustodialAddress: '',
+  nonCustodialLabel: 'External Address',
 };
 
 /**
- * Generates a fresh in-app Lightning sovereign wallet and saves it to persistent storage.
- * All transactions route off-chain through Lightning to eliminate on-chain fees.
+ * Generates a fresh in-app wallet identity and saves it to persistent
+ * storage. The handle is local to this device; a Lightning address is
+ * assigned by the operator backend once address serving exists.
  */
 export function createInAppLightningWallet(customHandle?: string): UserWallet {
-  const { username, lightningAddress } = generateInAppLightningWallet(customHandle);
+  const handle = customHandle?.trim()
+    ? customHandle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) || generateLocalHandle()
+    : generateLocalHandle();
+  saveLocalHandle(handle);
   const currentWallet = getStoredWallet();
   const updatedWallet: UserWallet = {
     ...currentWallet,
     isConnected: true,
     type: 'custodial',
-    nonCustodialAddress: lightningAddress,
-    nonCustodialLabel: 'In-App Lightning Sovereign Vault',
-    blinkUsername: username,
-    blinkAddress: lightningAddress,
+    nonCustodialAddress: '',
+    nonCustodialLabel: 'In-App Wallet',
+    localHandle: handle,
     lastSyncedAt: Date.now(),
   };
   saveStoredWallet(updatedWallet);
   return updatedWallet;
+}
+
+// Legacy transaction kinds stored by older versions; still counted.
+function isCreditKind(kind: string): boolean {
+  return kind === 'buy_btc' || kind === 'receive_btc' || kind === 'deposit_mobile' || kind === 'deposit_mpesa';
+}
+
+function isDebitKind(kind: string): boolean {
+  return (
+    kind === 'sell_btc' ||
+    kind === 'send_btc' ||
+    kind === 'send_mobile' ||
+    kind === 'send_mpesa' ||
+    kind === 'send_telebirr'
+  );
 }
 
 /**
@@ -66,7 +119,7 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
     if (!tx || typeof tx !== 'object') continue;
     if (tx.status !== 'completed' && !tx.isOffline) continue;
 
-    // Strictly skip explicit external hardware wallet transactions that do not touch the in-app vault
+    // Strictly skip explicit external hardware wallet transactions that do not touch the in-app wallet
     if (
       tx.walletType === 'non-custodial' &&
       (tx.title?.toLowerCase().includes('external') || tx.referenceNumber?.toLowerCase().includes('ext-') || tx.referenceNumber?.toLowerCase().includes('ext'))
@@ -88,7 +141,8 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
       continue;
     }
 
-    if (tx.type === 'buy_btc' || tx.type === 'receive_btc' || tx.type === 'deposit_mpesa') {
+    const kind = tx.type as string;
+    if (isCreditKind(kind)) {
       let sats = 0;
       if (tx.toCurrency === 'BTC') {
         sats = Math.round(Number(tx.toAmount || 0) * 100_000_000);
@@ -110,7 +164,7 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
       }
 
       netSats += Math.max(0, sats);
-    } else if (tx.type === 'sell_btc' || tx.type === 'send_mpesa' || tx.type === 'send_telebirr' || tx.type === 'send_btc') {
+    } else if (isDebitKind(kind)) {
       let sats = 0;
       if (tx.fromCurrency === 'BTC') {
         sats = Math.round(Number(tx.fromAmount || 0) * 100_000_000);
@@ -134,8 +188,24 @@ export function computeCustodialBalanceFromTransactions(txs: Transaction[]): num
   return Math.max(0, netSats);
 }
 
+/** Moves one legacy storage key to its new name, once. */
+function migrateLegacyKey(legacyKey: string, newKey: string): void {
+  try {
+    if (!localStorage.getItem(newKey)) {
+      const legacy = localStorage.getItem(legacyKey);
+      if (legacy) {
+        localStorage.setItem(newKey, legacy);
+      }
+    }
+    localStorage.removeItem(legacyKey);
+  } catch {
+    // ignore
+  }
+}
+
 export function getStoredTransactions(): Transaction[] {
   try {
+    migrateLegacyKey(LEGACY_TXS_KEY, TXS_STORAGE_KEY);
     const raw = localStorage.getItem(TXS_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -192,10 +262,7 @@ export function getStoredTransactions(): Transaction[] {
           const t: Transaction = { ...rawTx };
 
           // Auto-heal buy/receive transactions that had toAmount = 0 or missing
-          if (
-            (t.type === 'buy_btc' || t.type === 'receive_btc' || t.type === 'deposit_mpesa') &&
-            (!t.toAmount || Number(t.toAmount) <= 0)
-          ) {
+          if (isCreditKind(t.type as string) && (!t.toAmount || Number(t.toAmount) <= 0)) {
             if (fromAmt > 0) {
               if (t.fromCurrency === 'BTC') {
                 t.toAmount = Math.round(fromAmt * 100_000_000);
@@ -247,6 +314,7 @@ export function saveStoredTransactions(txs: Transaction[]): void {
 
 export function getStoredWallet(): UserWallet {
   try {
+    migrateLegacyKey(LEGACY_WALLET_KEY, WALLET_STORAGE_KEY);
     const raw = localStorage.getItem(WALLET_STORAGE_KEY);
     const validTxs = getStoredTransactions();
 
@@ -265,11 +333,6 @@ export function getStoredWallet(): UserWallet {
         parsed.nonCustodialAddress = '';
       }
 
-      // If address is empty, assign persistent sovereign Lightning address
-      if (!parsed.nonCustodialAddress) {
-        parsed.nonCustodialAddress = getBlinkSovereignAddress();
-      }
-
       let sats = 0;
       const ledgerSats = computeCustodialBalanceFromTransactions(validTxs);
       if (parsed.type === 'custodial') {
@@ -282,35 +345,28 @@ export function getStoredWallet(): UserWallet {
           : ledgerSats;
       }
 
-      // M-Pesa and Telebirr are payment rails, not in-app fiat balances. Always enforce 0.
       return {
         ...DEFAULT_WALLET,
         ...parsed,
         isConnected: true,
-        nonCustodialAddress: parsed.nonCustodialAddress || getBlinkSovereignAddress(),
-        nonCustodialLabel: parsed.nonCustodialLabel || (parsed.type === 'custodial' ? 'In-App Sovereign Vault' : 'Self-Custody Key'),
-        blinkUsername: parsed.blinkUsername || getBlinkSovereignUsername(),
-        blinkAddress: parsed.blinkAddress || getBlinkSovereignAddress(),
+        nonCustodialAddress: parsed.nonCustodialAddress || '',
+        nonCustodialLabel: parsed.nonCustodialLabel || (parsed.type === 'custodial' ? 'In-App Wallet' : 'External Address'),
+        localHandle: parsed.localHandle || getLocalHandle(),
         satsBalance: sats,
         btcBalance: sats / 100_000_000,
-        mpesaBalanceKes: 0,
-        telebirrBalanceEtb: 0,
       };
     } else {
-      // First visit: establish initial in-app sovereign wallet
+      // First visit: establish the initial in-app wallet
       const initialSats = computeCustodialBalanceFromTransactions(validTxs);
       const initialWallet: UserWallet = {
         ...DEFAULT_WALLET,
         isConnected: true,
         type: 'custodial',
-        nonCustodialAddress: getBlinkSovereignAddress(),
-        nonCustodialLabel: 'In-App Sovereign Vault',
-        blinkUsername: getBlinkSovereignUsername(),
-        blinkAddress: getBlinkSovereignAddress(),
+        nonCustodialAddress: '',
+        nonCustodialLabel: 'In-App Wallet',
+        localHandle: getLocalHandle(),
         satsBalance: initialSats,
         btcBalance: initialSats / 100_000_000,
-        mpesaBalanceKes: 0,
-        telebirrBalanceEtb: 0,
       };
       saveStoredWallet(initialWallet);
       return initialWallet;
@@ -361,10 +417,7 @@ export function addTransaction(
   };
 
   // Recover sats if toAmount was 0 or unassigned for buy/receive transactions
-  if (
-    (preparedTx.type === 'buy_btc' || preparedTx.type === 'receive_btc' || preparedTx.type === 'deposit_mpesa') &&
-    (!preparedTx.toAmount || Number(preparedTx.toAmount) <= 0)
-  ) {
+  if (isCreditKind(preparedTx.type as string) && (!preparedTx.toAmount || Number(preparedTx.toAmount) <= 0)) {
     const fromAmt = Number(preparedTx.fromAmount || 0);
     if (fromAmt > 0) {
       if (preparedTx.fromCurrency === 'BTC') {
@@ -401,12 +454,12 @@ export function addTransaction(
     updatedWallet.btcBalance = updatedWallet.satsBalance / 100_000_000;
   } else if (updatedWallet.type === 'non-custodial') {
     // For non-custodial wallets, adjust balance according to the authentic transaction executed
-    if (fullTx.type === 'buy_btc' || fullTx.type === 'receive_btc' || fullTx.type === 'deposit_mpesa') {
+    if (isCreditKind(fullTx.type as string)) {
       const addedSats = fullTx.toCurrency === 'BTC'
         ? Math.round(Number(fullTx.toAmount || 0) * 100_000_000)
         : Number(fullTx.toAmount || 0);
       updatedWallet.satsBalance = (typeof updatedWallet.satsBalance === 'number' ? updatedWallet.satsBalance : 0) + addedSats;
-    } else if (fullTx.type === 'sell_btc' || fullTx.type === 'send_mpesa' || fullTx.type === 'send_telebirr' || fullTx.type === 'send_btc') {
+    } else if (isDebitKind(fullTx.type as string)) {
       const sats = fullTx.fromCurrency === 'BTC'
         ? Math.round(Number(fullTx.fromAmount || 0) * 100_000_000)
         : Number(fullTx.fromAmount || 0);
@@ -424,9 +477,6 @@ export function addTransaction(
     }
     updatedWallet.btcBalance = (updatedWallet.satsBalance || 0) / 100_000_000;
   }
-  // Payment rails are not in-app fiat ledgers
-  updatedWallet.mpesaBalanceKes = 0;
-  updatedWallet.telebirrBalanceEtb = 0;
   updatedWallet.lastSyncedAt = Date.now();
 
   saveStoredWallet(updatedWallet);

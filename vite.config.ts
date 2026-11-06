@@ -16,7 +16,7 @@ function backendBridgePlugin() {
       });
       sock.on('error', () => {
         sock.destroy();
-        console.log('[yebente] Auto-starting Daraja backend bridge (node server.js)...');
+        console.log('[yebente] Auto-starting backend bridge (node server.js)...');
         const child = spawn('node', ['server.js'], {
           stdio: 'inherit',
           env: process.env,

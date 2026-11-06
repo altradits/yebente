@@ -9,11 +9,6 @@ import {
   isLightningAddress,
   resolveLightningAddress,
 } from '../services/lightningService';
-import {
-  createBlinkDepositInvoice,
-  checkBlinkInvoiceStatus,
-  getBlinkSovereignAddress,
-} from '../services/blinkService';
 import { isNetworkOnline } from '../services/offlineService';
 
 interface ReceiveBtcModalProps {
@@ -39,7 +34,6 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [copiedInvoice, setCopiedInvoice] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
-  const [isBlinkInvoice, setIsBlinkInvoice] = useState(false);
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -50,7 +44,11 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     ? wallet.nonCustodialAddress
     : '';
 
-  const sovereignBlinkAddress = wallet.blinkAddress || getBlinkSovereignAddress();
+  // The user's own external Lightning address from Settings, when one is set.
+  // Operator-served static addresses are not available yet (see docs/independence.md).
+  const externalLightningAddress = isLightningAddress(wallet.nonCustodialAddress)
+    ? wallet.nonCustodialAddress
+    : '';
 
   // Stop polling when modal closes or unmounts
   useEffect(() => {
@@ -86,14 +84,13 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     }
 
     if (!isNetworkOnline()) {
-      setErrorMessage('Offline mode active. Share your sovereign Lightning address to receive payments.');
+      setErrorMessage('Offline mode active. Share your Lightning address to receive payments.');
       setStep('error');
       return;
     }
 
     setIsGenerating(true);
     setErrorMessage('');
-    setIsBlinkInvoice(false);
 
     try {
       let res: {
@@ -122,25 +119,14 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
           error: externalInvoice.error,
         };
       } else {
-        // Primary: Generate BOLT-11 invoice via Blink API for the in-app sovereign address
-        const blinkRes = await createBlinkDepositInvoice(numericSats, 'YeBente Sovereign Sats Deposit');
-        if (blinkRes.success && blinkRes.invoice) {
-          res = {
-            success: true,
-            invoice: blinkRes.invoice,
-            paymentHash: blinkRes.paymentHash,
-          };
-          setIsBlinkInvoice(true);
-        } else {
-          // Secondary fallback: local node endpoint
-          res = await createDepositInvoice(numericSats, 'YeBente Lightning Deposit');
-        }
+        // Invoice minted on the operator's own LND node via the backend
+        res = await createDepositInvoice(numericSats, 'YeBente Lightning Deposit');
       }
 
       if (!res.success || !res.invoice) {
         setErrorMessage(
           res.error ||
-            'Could not reach Blink API or local Lightning node. Check internet connection.'
+            'Could not reach the Lightning node. Check the internet connection.'
         );
         setStep('error');
         return;
@@ -157,7 +143,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
       setStep('invoice');
 
       if (res.paymentHash) {
-        startPollingSettlement(res.paymentHash, numericSats, isBlinkInvoice);
+        startPollingSettlement(res.paymentHash, numericSats);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error generating invoice';
@@ -168,29 +154,19 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
     }
   };
 
-  const startPollingSettlement = (hash: string, sats: number, isBlink: boolean) => {
+  const startPollingSettlement = (hash: string, sats: number) => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
     }
 
     pollIntervalRef.current = setInterval(async () => {
       try {
-        if (isBlink) {
-          const blinkStatus = await checkBlinkInvoiceStatus(hash);
-          if (blinkStatus.paid || blinkStatus.settled) {
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-            }
-            triggerSuccess(hash, sats);
+        const res = await checkInvoiceStatus(hash);
+        if (res.paid || res.settled) {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
           }
-        } else {
-          const res = await checkInvoiceStatus(hash);
-          if (res.paid || res.settled) {
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-            }
-            triggerSuccess(hash, sats);
-          }
+          triggerSuccess(hash, sats);
         }
       } catch {
         // Continue polling
@@ -213,10 +189,10 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
       realFeeSats: 0,
       realFeeFiat: 0,
       realFeeCurrency: 'KES',
-      feeSource: 'blink',
+      feeSource: 'fixed',
       referenceNumber: hash,
       walletType: 'custodial',
-      note: 'Blink sovereign deposit',
+      note: 'Lightning deposit via operator node',
     });
   };
 
@@ -228,8 +204,8 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
   };
 
   const handleCopyAddress = () => {
-    if (!sovereignBlinkAddress) return;
-    navigator.clipboard.writeText(sovereignBlinkAddress);
+    if (!externalLightningAddress) return;
+    navigator.clipboard.writeText(externalLightningAddress);
     setCopiedAddress(true);
     setTimeout(() => setCopiedAddress(false), 2000);
   };
@@ -269,11 +245,11 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
             </span>
           </div>
 
-          {/* Sovereign Lightning address indicator */}
+          {/* External Lightning address indicator, when one is set in Settings */}
           <div className="flex justify-between items-center px-1 text-[11px]">
             <span className="text-[#9B97A2]">Lightning Address</span>
             <span className="font-mono text-emerald-400 font-semibold">
-              {sovereignBlinkAddress}
+              {externalLightningAddress || 'Not set'}
             </span>
           </div>
 
@@ -288,26 +264,34 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
           {/* STEP 1: Input */}
           {step === 'input' && (
             <div className="space-y-4">
-              {/* Sovereign Lightning Address Box */}
-              <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
-                <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
-                  <span>Static Lightning Address</span>
-                  <span className="font-mono text-[10px] text-emerald-400">LNURL-pay</span>
+              {/* External Lightning Address Box, when one is set in Settings */}
+              {externalLightningAddress ? (
+                <div className="w-full bg-[#140E1B] border border-[#382B44] p-3 rounded-2xl text-left space-y-2">
+                  <div className="flex justify-between items-center text-[11px] text-[#9B97A2]">
+                    <span>Static Lightning Address</span>
+                    <span className="font-mono text-[10px] text-emerald-400">LNURL-pay</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-semibold text-[#F8F0E7] select-all">
+                      {externalLightningAddress}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyAddress}
+                      className="p-1.5 rounded-lg bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
+                      title="Copy Lightning Address"
+                    >
+                      {copiedAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-semibold text-[#F8F0E7] select-all">
-                    {sovereignBlinkAddress}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyAddress}
-                    className="p-1.5 rounded-lg bg-[#231A2D] border border-[#3C2E49] hover:border-[#763698] text-[#9B97A2] hover:text-[#F8F0E7] transition-colors"
-                    title="Copy Lightning Address"
-                  >
-                    {copiedAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
+              ) : (
+                <div className="w-full p-3 rounded-2xl text-left">
+                  <p className="text-[11px] text-[#9B97A2] font-mono">
+                    No static address set. Operator-served addresses are not available yet; use an invoice below.
+                  </p>
                 </div>
-              </div>
+              )}
 
               {/* Sats to Receive */}
               <div>
@@ -393,7 +377,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
               <div className="flex items-center gap-2 text-xs font-mono text-[#D1B9B3]">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-[#763698]" />
                 <span>
-                  {isBlinkInvoice ? 'Awaiting settlement on Blink...' : 'Awaiting payment...'}
+                  Awaiting payment...
                 </span>
               </div>
 
@@ -449,7 +433,7 @@ export const ReceiveBtcModal: React.FC<ReceiveBtcModalProps> = ({
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-[#9B97A2]">Network</span>
-                  <span className="text-xs font-mono text-[#D1B9B3]">Blink Lightning Rail</span>
+                  <span className="text-xs font-mono text-[#D1B9B3]">Lightning Network</span>
                 </div>
               </div>
 

@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserWallet, ExchangeRates, Transaction } from '../types';
-import { ArrowLeft, Smartphone, CheckCircle2, Loader2, AlertTriangle, Zap, Copy, Check, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
-  initiateStkPush,
-  queryStkStatus,
   isValidKenyanPhone,
   formatKenyanDisplayPhone,
-} from '../services/mpesaService';
+} from '../services/phone';
 import {
   isValidEthiopianPhone,
   formatEthiopianDisplayPhone,
-  initiateTelebirrDeposit,
-} from '../services/telebirrService';
-import { isLightningAddress, resolveLightningAddress, createLightningInvoice } from '../services/lightningService';
+} from '../services/phone';
+import {
+  requestFiatQuote,
+  startFiatTransfer,
+  queryFiatStatus,
+  newIdempotencyKey,
+} from '../services/fiatService';
 import { KenyaPhoneInput } from './KenyaPhoneInput';
 import { EthiopiaPhoneInput } from './EthiopiaPhoneInput';
 
@@ -24,6 +26,10 @@ interface BuyBtcModalProps {
   onSuccess: (tx: Omit<Transaction, 'id' | 'timestamp'>) => void;
 }
 
+type Rail = 'kenya' | 'ethiopia';
+
+const RAIL_CURRENCY: Record<Rail, 'KES' | 'ETB'> = { kenya: 'KES', ethiopia: 'ETB' };
+
 export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   isOpen,
   onClose,
@@ -31,24 +37,20 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
   rates,
   onSuccess,
 }) => {
-  const [rail, setRail] = useState<'mpesa' | 'telebirr'>('mpesa');
+  const [rail, setRail] = useState<Rail>('kenya');
   const [amountFiat, setAmountFiat] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
-  const [step, setStep] = useState<'input' | 'processing' | 'awaiting_pin' | 'success' | 'error'>('input');
+  const [step, setStep] = useState<'input' | 'processing' | 'success' | 'error'>('input');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [errorUnavailable, setErrorUnavailable] = useState<boolean>(false);
+  const [processingStatus, setProcessingStatus] = useState<string>('Requesting quote...');
   const [realReference, setRealReference] = useState<string>('');
-  const [activeCheckoutId, setActiveCheckoutId] = useState<string>('');
+  const [quotedSats, setQuotedSats] = useState<number>(0);
+  const [quotedFee, setQuotedFee] = useState<number>(0);
   const [isVerifyingStatus, setIsVerifyingStatus] = useState<boolean>(false);
-  const [pinSecondsLeft, setPinSecondsLeft] = useState<number>(120);
-  const [inFlightStatus, setInFlightStatus] = useState<string>('Safaricom has dispatched a payment prompt to your phone.');
-  const [lightningInvoice, setLightningInvoice] = useState<string>('');
-  const [copiedInvoice, setCopiedInvoice] = useState(false);
-  const isCustodialWallet = wallet.type === 'custodial';
-  const configuredDestination = isCustodialWallet
-    ? 'In-App Vault'
-    : wallet.nonCustodialAddress;
 
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeReferenceRef = useRef<string>('');
 
   useEffect(() => {
     return () => {
@@ -60,121 +62,103 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentRate = rail === 'mpesa' ? rates.btcKes : rates.btcEtb;
-  const effectiveRate = currentRate > 0 ? currentRate : (rail === 'mpesa' ? 10_900_000 : 13_600_000);
-  const currencyCode = rail === 'mpesa' ? 'KES' : 'ETB';
+  const currencyCode = RAIL_CURRENCY[rail];
+  const currentRate = rail === 'kenya' ? rates.btcKes : rates.btcEtb;
   const numericFiat = parseFloat(amountFiat) || 0;
-  const satsAmount = Math.round((numericFiat / effectiveRate) * 100_000_000);
-  const estimatedFee = 0; // Lipa Na M-Pesa STK push and Telebirr deposits have 0 receiving fee
-
-  const displayPhone = rail === 'mpesa'
+  const satsPreview = currentRate > 0 ? Math.round((numericFiat / currentRate) * 100_000_000) : 0;
+  const isPhoneValid = rail === 'kenya' ? isValidKenyanPhone(phone) : isValidEthiopianPhone(phone);
+  const displayPhone = rail === 'kenya'
     ? formatKenyanDisplayPhone(phone)
     : formatEthiopianDisplayPhone(phone);
 
-  const handleCopyInvoice = () => {
-    if (lightningInvoice) {
-      navigator.clipboard.writeText(lightningInvoice);
-      setCopiedInvoice(true);
-      setTimeout(() => setCopiedInvoice(false), 2000);
+  const stopPolling = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
+  };
+
+  const fail = (message: string, unavailable: boolean) => {
+    stopPolling();
+    setErrorMessage(message);
+    setErrorUnavailable(unavailable);
+    setStep('error');
+  };
+
+  const succeed = (reference: string, sats: number, feeFiat: number, receipt?: string) => {
+    stopPolling();
+    setRealReference(receipt || reference);
+    setQuotedSats(sats);
+    setQuotedFee(feeFiat);
+    onSuccess({
+      type: 'buy_btc',
+      title: `Buy Sats via Mobile Money (${currencyCode})`,
+      status: 'completed',
+      fromCurrency: currencyCode,
+      fromAmount: numericFiat,
+      toCurrency: 'SATS',
+      toAmount: sats,
+      rateUsed: currentRate,
+      fee: feeFiat,
+      feeCurrency: currencyCode,
+      realFeeSats: 0,
+      realFeeFiat: feeFiat,
+      realFeeCurrency: currencyCode,
+      feeSource: 'fixed',
+      recipient: wallet.type === 'custodial' ? 'In-App Wallet' : wallet.nonCustodialAddress,
+      referenceNumber: receipt || reference,
+      walletType: 'custodial',
+      note: `Mobile-money collection (${currencyCode}) to ${wallet.type === 'custodial' ? 'in-app wallet' : wallet.nonCustodialAddress}`,
+    });
+    setStep('success');
+  };
+
+  const pollStatus = (reference: string, sats: number, feeFiat: number, attemptsLeft: number) => {
+    stopPolling();
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const statusRes = await queryFiatStatus(reference);
+        if (!statusRes.success) {
+          if (statusRes.unavailable) {
+            fail(statusRes.error || 'This fiat rail is not available yet.', true);
+            return;
+          }
+          return; // unclear answer: keep polling, never treat as failed
+        }
+        if (statusRes.state === 'paid') {
+          succeed(reference, sats, feeFiat, statusRes.receipt);
+          return;
+        }
+        if (statusRes.state === 'failed') {
+          fail('The collection failed on the money network. No Sats were credited.', false);
+          return;
+        }
+        setProcessingStatus('Waiting for the money network to confirm...');
+      } catch {
+        // Continue polling until attempts run out
+      }
+      attemptsLeft -= 1;
+      if (attemptsLeft <= 0) {
+        stopPolling();
+        setProcessingStatus('Still waiting. If you authorized the payment, check its status now.');
+        setIsVerifyingStatus(false);
+      }
+    }, 3000);
   };
 
   const handleManualVerify = async () => {
-    if (!activeCheckoutId || isVerifyingStatus) return;
+    const reference = activeReferenceRef.current;
+    if (!reference || isVerifyingStatus) return;
     setIsVerifyingStatus(true);
     try {
-      const queryRes = await queryStkStatus(activeCheckoutId);
-      processQueryResponse(queryRes);
+      const statusRes = await queryFiatStatus(reference);
+      if (statusRes.success && statusRes.state === 'paid') {
+        succeed(reference, quotedSats, quotedFee, statusRes.receipt);
+      } else if (statusRes.success && statusRes.state === 'failed') {
+        fail('The collection failed on the money network. No Sats were credited.', false);
+      }
     } finally {
       setIsVerifyingStatus(false);
-    }
-  };
-
-  const processQueryResponse = (queryRes: any) => {
-    const code = queryRes?.resultCode;
-
-    // 1. ResultCode 0 or '0' indicates confirmed settlement by Safaricom
-    if (code === 0 || code === '0') {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      const refCode = queryRes.mpesaReceiptNumber || activeCheckoutId;
-      setRealReference(refCode);
-
-      onSuccess({
-        type: 'buy_btc',
-        title: 'Buy Sats via M-Pesa',
-        status: 'completed',
-        fromCurrency: 'KES',
-        fromAmount: numericFiat,
-        toCurrency: 'SATS',
-        toAmount: satsAmount,
-        rateUsed: effectiveRate,
-        fee: estimatedFee,
-        feeCurrency: 'KES',
-        realFeeSats: 0,
-        realFeeFiat: estimatedFee,
-        realFeeCurrency: 'KES',
-        feeSource: 'blink',
-        recipient: isCustodialWallet ? 'In-App Sovereign Vault' : configuredDestination,
-        referenceNumber: refCode,
-        walletType: 'custodial',
-        note: `Daraja STK purchase to ${configuredDestination}`,
-      });
-
-      setStep('success');
-      return;
-    }
-
-    // 2. In-flight / pending PIN entry: keep polling smoothly
-    if (
-      queryRes?.inProgress ||
-      code === 49 ||
-      code === '49' ||
-      (typeof queryRes?.resultDesc === 'string' && queryRes.resultDesc.toLowerCase().includes('processing'))
-    ) {
-      setInFlightStatus('Payment prompt open on phone. Please enter your PIN to authorize.');
-      return;
-    }
-
-    // 3. Explicit terminal Safaricom cancellation or error codes
-    const numCode = Number(code);
-    if (numCode === 1032) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      setErrorMessage('M-Pesa payment prompt was cancelled on your phone (M-Pesa 1032). No Sats were credited.');
-      setStep('error');
-    } else if (numCode === 1037) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      setErrorMessage('M-Pesa PIN prompt timed out without PIN entry (M-Pesa 1037). No Sats were credited.');
-      setStep('error');
-    } else if (numCode === 2001) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      setErrorMessage('Incorrect M-Pesa PIN was entered (M-Pesa 2001). No Sats were credited.');
-      setStep('error');
-    } else if (numCode === 1) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      setErrorMessage('Insufficient M-Pesa balance on your handset (M-Pesa 1). No Sats were credited.');
-      setStep('error');
-    } else if (code !== undefined && code !== null && code !== '' && code !== 49 && code !== '49') {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      setErrorMessage(queryRes.resultDesc || 'M-Pesa payment was not completed by Safaricom.');
-      setStep('error');
     }
   };
 
@@ -182,172 +166,78 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
     if (numericFiat <= 0) return;
 
     if (currentRate <= 0) {
-      setErrorMessage('Live Bitcoin exchange rates are unavailable. Connect to the internet to calculate Sats purchase.');
-      setStep('error');
+      fail('Exchange rates are not available yet. Connect to the backend to calculate a Sats purchase.', true);
       return;
     }
 
-    if (rail === 'mpesa') {
-      if (!isValidKenyanPhone(phone)) {
-        setErrorMessage('Please enter a valid Safaricom number: 07XXXXXXXX or 01XXXXXXXX');
-        setStep('error');
-        return;
-      }
-
-      setStep('processing');
-      setErrorMessage('');
-
-      const res = await initiateStkPush({
-        phone,
-        amount: numericFiat,
-        accountReference: 'BuySats',
-        transactionDesc: 'Bitcoin Purchase',
-      });
-
-      if (!res.success || !res.checkoutRequestId) {
-        setErrorMessage(res.error || 'Failed to dispatch M-Pesa STK Push prompt: No CheckoutRequestID returned.');
-        setStep('error');
-        return;
-      }
-
-      const refCode = res.checkoutRequestId;
-      setActiveCheckoutId(refCode);
-      setRealReference(refCode);
-      setPinSecondsLeft(120);
-      setInFlightStatus('Safaricom has dispatched a payment prompt to your phone.');
-
-      if (!isCustodialWallet && isLightningAddress(configuredDestination)) {
-        try {
-          const details = await resolveLightningAddress(configuredDestination);
-          if (details.success && details.callbackUrl) {
-            const invRes = await createLightningInvoice(details.callbackUrl, satsAmount, 'Ye₿ente Sats Purchase');
-            if (invRes.success && invRes.invoice) {
-              setLightningInvoice(invRes.invoice);
-            }
-          }
-        } catch {
-          // Safe fallback
-        }
-      }
-
-      setStep('awaiting_pin');
-
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-
-      let remaining = 120;
-      pollIntervalRef.current = setInterval(async () => {
-        remaining -= 2;
-        setPinSecondsLeft(Math.max(0, remaining));
-
-        try {
-          const queryRes = await queryStkStatus(refCode);
-          processQueryResponse(queryRes);
-        } catch {
-          // Continue polling until timeout
-        }
-
-        if (remaining <= 0) {
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
-          }
-          try {
-            const finalRes = await queryStkStatus(refCode);
-            processQueryResponse(finalRes);
-          } catch {
-            // Keep window accessible for manual verification
-          }
-          setInFlightStatus('Verification window paused. If you entered your PIN, click "Check Status Now" to credit your Sats.');
-        }
-      }, 2500);
-    } else {
-      // Telebirr ETB Deposit
-      if (!isValidEthiopianPhone(phone)) {
-        setErrorMessage('Please enter a valid Telebirr number: 09XXXXXXXX or 07XXXXXXXX');
-        setStep('error');
-        return;
-      }
-
-      setStep('processing');
-      setErrorMessage('');
-
-      try {
-        const res = await initiateTelebirrDeposit({
-          phone,
-          amount: numericFiat,
-          satsAmount,
-        });
-
-        if (!res.success) {
-          setErrorMessage(res.error || 'Failed to process Telebirr deposit.');
-          setStep('error');
-          return;
-        }
-
-        const refCode = res.referenceNumber || res.transactionId || `TB${Date.now()}`;
-        setRealReference(refCode);
-
-        onSuccess({
-          type: 'buy_btc',
-          title: 'Buy Sats via Telebirr',
-          status: 'completed',
-          fromCurrency: 'ETB',
-          fromAmount: numericFiat,
-          toCurrency: 'SATS',
-          toAmount: satsAmount,
-          rateUsed: effectiveRate,
-          fee: estimatedFee,
-          feeCurrency: 'ETB',
-          realFeeSats: 0,
-          realFeeFiat: estimatedFee,
-          realFeeCurrency: 'ETB',
-          feeSource: 'blink',
-          recipient: isCustodialWallet ? 'In-App Sovereign Vault' : configuredDestination,
-          referenceNumber: refCode,
-          walletType: 'custodial',
-          note: `Telebirr deposit to ${configuredDestination}`,
-        });
-
-        setStep('success');
-      } catch (err: unknown) {
-        setErrorMessage(err instanceof Error ? err.message : 'Error processing Telebirr deposit.');
-        setStep('error');
-      }
+    if (!isPhoneValid) {
+      fail(
+        rail === 'kenya'
+          ? 'Please enter a valid Kenyan number: 07XXXXXXXX or 01XXXXXXXX.'
+          : 'Please enter a valid Ethiopian number: 09XXXXXXXX or 07XXXXXXXX.',
+        false
+      );
+      return;
     }
+
+    setStep('processing');
+    setErrorMessage('');
+    setErrorUnavailable(false);
+    setProcessingStatus('Requesting quote...');
+
+    const fiatMinor = Math.round(numericFiat * 100);
+    const quote = await requestFiatQuote({ direction: 'buy', currency: currencyCode, amount: fiatMinor });
+    if (!quote.success) {
+      fail(quote.error || 'A fiat quote is not available yet.', Boolean(quote.unavailable));
+      return;
+    }
+
+    setQuotedSats(quote.sats || 0);
+    setQuotedFee((quote.feeFiatMinor || 0) / 100);
+    setProcessingStatus('Starting collection on the money network...');
+
+    const transfer = await startFiatTransfer({
+      direction: 'buy',
+      quoteId: quote.quoteId || '',
+      phone,
+      idempotencyKey: newIdempotencyKey(),
+    });
+    if (!transfer.success || !transfer.reference) {
+      fail(transfer.error || 'This fiat rail is not available yet.', Boolean(transfer.unavailable));
+      return;
+    }
+
+    setRealReference(transfer.reference);
+    activeReferenceRef.current = transfer.reference;
+    if (transfer.state === 'paid') {
+      succeed(transfer.reference, quote.sats || 0, (quote.feeFiatMinor || 0) / 100, transfer.receipt);
+      return;
+    }
+    setProcessingStatus('Collection started. Confirm on your phone when prompted...');
+    pollStatus(transfer.reference, quote.sats || 0, (quote.feeFiatMinor || 0) / 100, 40);
   };
 
   const handleResetAndClose = () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
+    stopPolling();
+    activeReferenceRef.current = '';
     setStep('input');
     setErrorMessage('');
-    setLightningInvoice('');
-    setActiveCheckoutId('');
-    setCopiedInvoice(false);
+    setErrorUnavailable(false);
     onClose();
   };
 
   const handleBack = () => {
-    if (step === 'awaiting_pin' || step === 'error' || step === 'success') {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
+    if (step === 'processing' || step === 'error' || step === 'success') {
+      stopPolling();
       setStep('input');
       setErrorMessage('');
+      setErrorUnavailable(false);
       return;
     }
     handleResetAndClose();
   };
 
-  const isFormValid =
-    numericFiat > 0 &&
-    currentRate > 0 &&
-    (rail === 'mpesa' ? isValidKenyanPhone(phone) : isValidEthiopianPhone(phone));
+  const isFormValid = numericFiat > 0 && currentRate > 0 && isPhoneValid;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#120E16]/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -370,35 +260,35 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-4">
           {step === 'input' && (
             <>
-              {/* Mobile Network Tab Selector */}
-              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select mobile network">
+              {/* Rail selector */}
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select mobile-money rail">
                 <button
                   type="button"
                   onClick={() => {
-                    setRail('mpesa');
+                    setRail('kenya');
                     setPhone('');
                   }}
                   className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    rail === 'mpesa'
+                    rail === 'kenya'
                       ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
                       : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
                   }`}
                 >
-                  M-Pesa (KES)
+                  Kenya (KES)
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    setRail('telebirr');
+                    setRail('ethiopia');
                     setPhone('');
                   }}
                   className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    rail === 'telebirr'
+                    rail === 'ethiopia'
                       ? 'bg-[#2E203C] border-[#763698] text-[#F8F0E7]'
                       : 'bg-[#140E1B] border-[#382B44] text-[#9B97A2]'
                   }`}
                 >
-                  Telebirr (ETB)
+                  Ethiopia (ETB)
                 </button>
               </div>
 
@@ -424,34 +314,28 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
 
               {/* Sats preview */}
               <div className="flex justify-between items-center px-1 text-xs">
-                <span className="text-[#9B97A2]">You Receive</span>
+                <span className="text-[#9B97A2]">You Receive (estimated)</span>
                 <span className="font-mono font-bold text-[#F8F0E7]">
-                  +{satsAmount.toLocaleString()} Sats
+                  +{satsPreview.toLocaleString()} Sats
                 </span>
               </div>
 
               {/* Phone input component */}
-              {rail === 'mpesa' ? (
+              {rail === 'kenya' ? (
                 <KenyaPhoneInput
                   value={phone}
                   onChange={(full) => setPhone(full)}
-                  label="M-Pesa Phone Number"
-                  ariaLabel="M-Pesa phone number"
+                  label="Kenya phone number"
+                  ariaLabel="Kenya phone number"
                 />
               ) : (
                 <EthiopiaPhoneInput
                   value={phone}
                   onChange={(full) => setPhone(full)}
-                  label="Telebirr Phone Number"
-                  ariaLabel="Telebirr phone number"
+                  label="Ethiopia phone number"
+                  ariaLabel="Ethiopia phone number"
                 />
               )}
-
-              {/* Receiving fee summary */}
-              <div className="flex justify-between items-center text-xs text-[#9B97A2] px-1 font-mono">
-                <span>Receiving Fee</span>
-                <span className="text-emerald-400 font-semibold">0 {currencyCode} (Free)</span>
-              </div>
 
               {/* Action button */}
               <button
@@ -471,81 +355,36 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 <Loader2 className="w-8 h-8 animate-spin" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">
-                  {rail === 'mpesa' ? 'Dispatching M-Pesa Prompt' : 'Processing Telebirr Deposit'}
-                </h3>
-                <p className="text-xs text-[#9B97A2] font-mono mt-1">
-                  {rail === 'mpesa' ? 'Connecting to Safaricom Daraja...' : 'Connecting to Ethio Telecom Telebirr...'}
-                </p>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Processing Collection</h3>
+                <p className="text-xs text-[#9B97A2] font-mono mt-1">{processingStatus}</p>
               </div>
-            </div>
-          )}
-
-          {step === 'awaiting_pin' && (
-            <div className="py-6 flex flex-col items-center text-center space-y-4">
-              <div className="relative">
-                <div className="w-16 h-16 rounded-full bg-[#763698]/25 border border-[#763698]/50 flex items-center justify-center text-[#D1B9B3]">
-                  <Smartphone className="w-8 h-8 animate-pulse text-[#F8F0E7]" />
+              {realReference && (
+                <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-[#9B97A2]">Amount</span>
+                    <span className="text-[#F8F0E7] font-bold">{numericFiat.toLocaleString()} {currencyCode}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#9B97A2]">Quoted Sats</span>
+                    <span className="text-[#D1B9B3] font-bold">+{quotedSats.toLocaleString()} Sats</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#9B97A2]">Reference</span>
+                    <span className="text-[#9B97A2] text-[10px] truncate max-w-[170px]">{realReference}</span>
+                  </div>
                 </div>
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#2A1E37] border border-[#763698] flex items-center justify-center">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D1B9B3]" />
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Enter M-Pesa PIN on Phone</h3>
-                <p className="text-xs text-[#D1B9B3] mt-1 max-w-xs">
-                  Safaricom prompt dispatched to <span className="font-mono font-bold text-[#F8F0E7]">{formatKenyanDisplayPhone(phone)}</span>.
-                </p>
-                <p className="text-[11px] text-[#D1B9B3] mt-0.5">
-                  {inFlightStatus}
-                </p>
-              </div>
-
-              <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Amount</span>
-                  <span className="text-[#F8F0E7] font-bold">{numericFiat.toLocaleString()} KES</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Sats to Receive</span>
-                  <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Receiving Fee</span>
-                  <span className="text-emerald-400 font-semibold">0 KES (Free)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Checkout Request ID</span>
-                  <span className="text-[#9B97A2] text-[10px] truncate max-w-[170px]">{activeCheckoutId}</span>
-                </div>
-                <div className="flex justify-between items-center pt-1 border-t border-[#382B44]/60">
-                  <span className="text-[#9B97A2]">Verification Window</span>
-                  <span className="text-amber-400 font-bold">
-                    {pinSecondsLeft > 0 ? `${pinSecondsLeft}s` : 'Paused'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="w-full flex gap-2">
+              )}
+              {realReference && (
                 <button
                   type="button"
                   onClick={handleManualVerify}
                   disabled={isVerifyingStatus}
-                  className="flex-1 h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                  className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] active:scale-[0.98] text-[#F8F0E7] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingStatus ? 'animate-spin' : ''}`} />
                   <span>{isVerifyingStatus ? 'Checking...' : 'Check Status Now'}</span>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={handleResetAndClose}
-                  className="h-11 px-4 rounded-2xl bg-[#281E33] hover:bg-[#342743] text-[#9B97A2] hover:text-[#F8F0E7] font-medium text-xs transition-all"
-                >
-                  Cancel
-                </button>
-              </div>
+              )}
             </div>
           )}
 
@@ -555,76 +394,36 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Payment Verified & Sats Credited</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">Payment Verified and Sats Credited</h3>
                 <p className="text-xs text-emerald-400 font-mono mt-0.5">
-                  {rail === 'mpesa' ? 'Safaricom confirmed settlement successfully' : 'Telebirr confirmed settlement successfully'}
+                  The money network confirmed settlement
                 </p>
               </div>
 
               <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3.5 text-left font-mono text-xs space-y-2">
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Sats Acquired</span>
-                  <span className="text-[#D1B9B3] font-bold">+{satsAmount.toLocaleString()} Sats</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Credited To</span>
-                  <span className="text-emerald-400 font-semibold">Ye₿ente Portfolio (+{satsAmount.toLocaleString()} Sats)</span>
+                  <span className="text-[#D1B9B3] font-bold">+{quotedSats.toLocaleString()} Sats</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Paid Amount</span>
                   <span className="text-[#F8F0E7]">{numericFiat.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Receiving Fee</span>
-                  <span className="text-emerald-400 font-semibold">0 {currencyCode} (Free)</span>
+                  <span className="text-[#9B97A2]">Fee</span>
+                  <span className="text-[#D1B9B3]">{quotedFee.toLocaleString()} {currencyCode}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#9B97A2]">Phone Number</span>
                   <span className="text-[#D1B9B3] font-mono">{displayPhone}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9B97A2]">Destination</span>
-                  <span className="text-[#D1B9B3] truncate max-w-[180px]">
-                    {configuredDestination}
-                  </span>
-                </div>
                 {realReference && (
                   <div className="flex justify-between">
-                    <span className="text-[#9B97A2]">{rail === 'mpesa' ? 'Safaricom Reference' : 'Telebirr Reference'}</span>
+                    <span className="text-[#9B97A2]">Reference</span>
                     <span className="text-[#D1B9B3] font-mono text-[10px] truncate max-w-[180px]">{realReference}</span>
                   </div>
                 )}
               </div>
-
-              {lightningInvoice ? (
-                <div className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl p-3 space-y-2 text-left">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs text-[#D1B9B3] font-semibold">
-                      <Zap className="w-3.5 h-3.5 text-[#D1B9B3]" />
-                      <span>Wallet of Satoshi Invoice</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyInvoice}
-                      className="px-2 py-1 rounded-lg bg-[#231A2D] border border-[#3C2E49] text-[11px] font-mono text-[#9B97A2] hover:text-[#F8F0E7] flex items-center gap-1 transition-colors"
-                    >
-                      {copiedInvoice ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedInvoice ? 'Copied' : 'Copy'}</span>
-                    </button>
-                  </div>
-                  <p className="font-mono text-[10px] text-[#9B97A2] break-all select-all bg-[#0E0A13] p-2 rounded-xl border border-[#2B2135]">
-                    {lightningInvoice}
-                  </p>
-                  <p className="text-[10px] text-[#9B97A2] leading-relaxed">
-                    Sats have been credited to your Ye₿ente vault balance. Automated node settlement requires configuring LNBITS_URL or LND_REST_URL in .env.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-emerald-300 text-xs w-full text-left">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span>{satsAmount.toLocaleString()} Sats added to your Ye₿ente balance.</span>
-                </div>
-              )}
 
               <button
                 type="button"
@@ -642,7 +441,9 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 <AlertTriangle className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-[#F8F0E7]">Transaction Incomplete</h3>
+                <h3 className="text-lg font-bold text-[#F8F0E7]">
+                  {errorUnavailable ? 'Not Available Yet' : 'Transaction Incomplete'}
+                </h3>
                 <p className="text-xs text-[#9B97A2] font-mono mt-1 px-4">{errorMessage}</p>
               </div>
 
@@ -651,7 +452,7 @@ export const BuyBtcModal: React.FC<BuyBtcModalProps> = ({
                 onClick={() => setStep('input')}
                 className="w-full h-11 rounded-2xl bg-[#763698] hover:bg-[#8A41B0] text-[#F8F0E7] font-medium text-sm transition-all"
               >
-                Retry
+                Back
               </button>
             </div>
           )}

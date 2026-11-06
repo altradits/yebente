@@ -6,7 +6,6 @@ import { payInvoiceWithWebLN,
   resolveLightningAddress,
   createLightningInvoice,
 } from '../services/lightningService';
-import { calculateRealTransactionCost, RealTransactionCost } from '../services/blinkService';
 import { isNetworkOnline, queueOfflineTransaction } from '../services/offlineService';
 
 interface SendBtcModalProps {
@@ -49,34 +48,19 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
   const [isResolving, setIsResolving] = useState(false);
   const [resolvedCallback, setResolvedCallback] = useState<string>('');
   const [txReference, setTxReference] = useState<string>('');
-  const [realCost, setRealCost] = useState<RealTransactionCost>({
-    feeSats: 1,
-    feeFiat: 0.11,
-    feeFiatCurrency: 'KES',
-    source: 'blink',
-  });
   const [wasOfflineDispatched, setWasOfflineDispatched] = useState<boolean>(false);
 
   const numericSats = parseInt(satsAmountStr, 10) || 0;
   const availableSats = wallet.satsBalance ?? Math.round((wallet.btcBalance || 0) * 100_000_000);
-  const btcRate = rates?.btcKes || 11100000;
+  const btcRate = rates?.btcKes || 0;
 
-  // Real fee dynamically tracked via Blink
-  const satsFee = realCost.feeSats;
+  // Conservative local routing-fee estimate: 1 sat base plus 0.05%.
+  // The paying wallet reports the exact fee; this only sizes the preview.
+  const satsFee = Math.max(1, Math.round(numericSats * 0.0005));
+  const feeFiat = btcRate > 0 ? Math.round((satsFee / 100_000_000) * btcRate * 100) / 100 : 0;
   const totalDeducted = numericSats + satsFee;
   const isInsufficientSats = totalDeducted > availableSats;
   const currentlyOnline = isNetworkOnline();
-
-  // Recalculate real transaction cost when amount changes
-  useEffect(() => {
-    calculateRealTransactionCost({
-      type: 'lightning',
-      satsAmount: numericSats,
-      btcRate,
-      currency: 'KES',
-      isOffChainLightningRoute: true,
-    }).then(setRealCost);
-  }, [numericSats, btcRate]);
 
   // Auto-detect and resolve recipient format on change
   useEffect(() => {
@@ -91,9 +75,9 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
 
     if (isOnChainAddress(clean)) {
       setRecipientType('invalid_onchain');
-      setResolvedProvider('On-Chain Bitcoin (Unsupported)');
+      setResolvedProvider('On-Chain Bitcoin (Not Available Yet)');
       setResolvedCallback('');
-      setErrorMessage('On-chain Bitcoin addresses are not supported. Ye₿ente operates exclusively on Lightning. Please enter a Lightning Address (e.g. name@blink.sv) or a BOLT-11 invoice (lnbc...).');
+      setErrorMessage('On-chain sends are not available yet in this app. Please enter a Lightning Address (e.g. name@wallet-domain.com) or a BOLT-11 invoice (lnbc...).');
       return;
     }
 
@@ -154,10 +138,10 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
       fee: satsFee,
       feeCurrency: 'SATS',
       realFeeSats: satsFee,
-      realFeeFiat: realCost.feeFiat,
-      realFeeCurrency: realCost.feeFiatCurrency,
+      realFeeFiat: feeFiat,
+      realFeeCurrency: 'KES',
       feeRateSatPerVb: 0,
-      feeSource: 'blink',
+      feeSource: 'fixed',
       recipient: targetRecipient,
       referenceNumber: `OFFLINE-${Date.now().toString(36).toUpperCase()}`,
       walletType: 'custodial',
@@ -174,19 +158,19 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
   const handleSend = async () => {
     const cleanRecipient = sanitizeLightningInput(recipient);
     if (!cleanRecipient) {
-      setErrorMessage('Please enter a Lightning Address (e.g. name@blink.sv) or BOLT-11 invoice (lnbc...).');
+      setErrorMessage('Please enter a Lightning Address (e.g. name@wallet-domain.com) or BOLT-11 invoice (lnbc...).');
       setIsNetworkFailure(false);
       return;
     }
 
     if (recipientType === 'invalid_onchain' || isOnChainAddress(cleanRecipient)) {
-      setErrorMessage('On-chain Bitcoin addresses are not supported. Ye₿ente operates exclusively on Lightning. Please enter a Lightning Address or a BOLT-11 invoice.');
+      setErrorMessage('On-chain sends are not available yet in this app. Please enter a Lightning Address or a BOLT-11 invoice.');
       setIsNetworkFailure(false);
       return;
     }
 
     if (recipientType !== 'lightning_address' && recipientType !== 'lightning_invoice') {
-      setErrorMessage('Please enter a valid Lightning Address (e.g. user@blink.sv) or a BOLT-11 invoice (lnbc...).');
+      setErrorMessage('Please enter a valid Lightning Address (e.g. user@wallet-domain.com) or a BOLT-11 invoice (lnbc...).');
       setIsNetworkFailure(false);
       return;
     }
@@ -296,10 +280,10 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
       fee: satsFee,
       feeCurrency: 'SATS',
       realFeeSats: satsFee,
-      realFeeFiat: realCost.feeFiat,
-      realFeeCurrency: realCost.feeFiatCurrency,
+      realFeeFiat: feeFiat,
+      realFeeCurrency: 'KES',
       feeRateSatPerVb: 0,
-      feeSource: 'blink',
+      feeSource: 'fixed',
       recipient: targetRecipient,
       referenceNumber: ref,
       walletType: 'custodial',
@@ -357,7 +341,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                     type="text"
                     value={recipient}
                     onChange={(e) => setRecipient(e.target.value)}
-                    placeholder="user@blink.sv, user@walletofsatoshi.com, or lnbc..."
+                    placeholder="user@wallet-domain.com or lnbc..."
                     className="w-full bg-[#140E1B] border border-[#382B44] rounded-2xl px-4 py-2.5 text-xs font-mono text-[#F8F0E7] focus:outline-none focus:border-[#763698]"
                   />
                   {isResolving && (
@@ -433,7 +417,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                 <div className="flex justify-between items-center text-[#9B97A2]">
                   <span>Lightning Routing Fee</span>
                   <span className="font-mono text-[#D1B9B3]">
-                    {satsFee.toLocaleString()} Sat (~{realCost.feeFiat} {realCost.feeFiatCurrency})
+                    {satsFee.toLocaleString()} Sat (~{feeFiat} KES)
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-[#9B97A2]">
@@ -501,7 +485,7 @@ export const SendBtcModal: React.FC<SendBtcModalProps> = ({
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-[#9B97A2]">Routing Fee</span>
                   <span className="text-xs font-mono text-[#D1B9B3]">
-                    {satsFee.toLocaleString()} Sat (~{realCost.feeFiat} {realCost.feeFiatCurrency})
+                    {satsFee.toLocaleString()} Sat (~{feeFiat} KES)
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
